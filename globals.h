@@ -6,8 +6,8 @@
 
 
 //One of the following WS28xx #defines must be enabled! (but not both)
-//#define WS2811
-#define WS2812
+#define WS2811
+//#define WS2812
 
 
 /* The CPU Speed in MHz per second. Since 1 Mhz clocks means each clock is
@@ -36,7 +36,7 @@
 #define LEFT                           0
 #define RIGHT                          1
 #define COLOR_CHANNELS                 10
-
+#define PEAK_FRAMES                    40
 
 /* Define the frame states for control */
 typedef enum

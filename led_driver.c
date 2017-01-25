@@ -21,7 +21,6 @@
 
 //Global variables
 uint32_t  frame_cnt;
-uint32_t  error_cnt;
 uint16_t  pause;
 
 #ifdef TIMING
@@ -42,7 +41,6 @@ void led_driver_init(void)
 {
   frame_cnt  = 0;
   frame_sync = 0;
-  error_cnt  = 0;
   pause      = 0;
 #ifdef TIMING
   time_idx   = 0;
@@ -240,17 +238,6 @@ void led_driver(void)
     send_led_data();
   }
 
-  //A delay of 500us (no data to the LEDs) is required after sending data.
-  //An explicit delay isn't needed since this won't be called until the next
-  //frame.
-
-  frame_cnt ++;
-
-  //If frame_sync is true, then the pattern generation has not cleared it
-  //(meaning it is still generating data, which is not good).
-  if (frame_sync == 1)
-    error_cnt ++;
-
   //Set frame_sync for pattern generation (1 means the data was sent)
-  frame_sync = 1;
+  frame_sync = 0;
 }

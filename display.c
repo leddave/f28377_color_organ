@@ -1,5 +1,5 @@
 /*****************************************************************************
- * This is the rgb_f28377 project source.
+ * This is the f28377_color_organ project source.
  *****************************************************************************/
 #include <stdio.h>
 #include <string.h>
@@ -14,6 +14,7 @@
 Led       led[MAX_LEDS];
 //Led       tled[MAX_LEDS]; //temp work buff
 extern volatile uint16_t frame_sync;
+extern uint16_t  pause;
 
 
 //Define a long (wide) array of LED panels (the current design is for each panel
@@ -28,6 +29,8 @@ extern volatile uint16_t frame_sync;
 #endif
 #define MAX_ROW      PANEL_ROW
 #define MAX_COL     (PANEL_COL * NUM_PANEL)
+
+#define OLD_STYLE_BULBS
 
 
 // The following tables are built to convert a 2D x:y position into an index
@@ -72,21 +75,21 @@ const uint16_t panel_off[NUM_PANEL][2] =
 
 
 #pragma DATA_SECTION(rainbow, "ramConsts")
-#define MAX_RGB_VAL     0xe0
+#define MAX_RGB_VAL     0xf0
 
 //The function get_rgb() can be used to break these colors into component values.
-const uint32_t rainbow[12] = {0xe00000,  //red
-                              0xe02000,  //orange
-                              0xe0e000,  //yellow
+const uint32_t rainbow[12] = {0xf00000,  //red
+                              0xe02200,  //orange
+                              0xf0f000,  //yellow
                               0x60e000,  //lime
-                              0x00e000,  //green
-                              0x00e030,  //l green
+                              0x00f000,  //green
+                              0x00e033,  //l green
                               0x00e090,  //cyan
                               0x0070b0,  //marine
-                              0x0000d0,  //blue
-                              0x7000e0,  //l blue
-                              0x800070,  //purple
-                              0xe00020}; //fushia
+                              0x0000f0,  //blue
+                              0x7700e0,  //l blue
+                              0x880077,  //purple
+                              0xe00022}; //fushia
 
 
 #pragma DATA_SECTION(chan_clr, "ramConsts")
@@ -137,6 +140,8 @@ const uint16_t chan_bin[COLOR_CHANNELS+1] = {0, 1, 2, 5, 14, 20, 27, 35, 70, 105
 //This array maps into the rainbow[] array to assign colors to each color organ channel.
 const uint16_t chan_clr[COLOR_CHANNELS] = {0, 1, 11, 8, 7, 6, 5, 4, 3, 2};
 
+//Temporary storage for the two-by-two function
+uint16_t tbt_map[MAX_ROW/2][MAX_COL/2];
 
 void display_init(void)
 {
@@ -151,12 +156,16 @@ void wait_for_sync(uint32_t num_syncs)
 {
   uint16_t idx;
 
+  pause = 0;
+
   for (idx = 0; idx < num_syncs; idx ++)
   {
     while (frame_sync == 0)
     {  }
 
-    frame_sync = 0;
+    led_driver();
+
+    pause = 1;
   }
 }
 
@@ -400,6 +409,108 @@ void pixel_up(void)
 }
 
 
+#pragma CODE_SECTION(two_by_two, "ramCode")
+
+#define MIN_TBT_FRAMES                (FRAMES_PER_SEC * 4)
+uint32_t tbt_frames = 9999;
+
+//This function creates a display where each 2x2 pixel subarray is assigned a
+//random color organ channel.  When the peak flag is set (after a minumum number
+//of frames), it will shuffle the 2x2s.
+void two_by_two(uint16_t side, uint16_t peak_flag, uint16_t *chan_val)
+{
+  uint32_t color;
+  uint16_t idx, idx2, idx3;
+  uint16_t r, g, b, cv;
+  uint16_t rw, cl;
+  uint16_t side_offset;
+  uint16_t shift;
+  uint16_t temp[MAX_ROW/2];
+
+  if (side == LEFT)
+    side_offset = 0;
+  else
+    side_offset = PANEL_COL;
+
+  if (peak_flag & (tbt_frames > MIN_TBT_FRAMES))
+  {
+    tbt_frames = 0;
+
+    //Create a new random arrangement of 2x2s.
+    if (side == LEFT)
+    {
+      //First, create a linear arrangement to guarantee equal channel distribution
+      for (idx = 0; idx < MAX_ROW/2; idx ++)
+      {
+        for (idx2 = 0; idx2 < MAX_COL/2; idx2 ++)
+        {
+          tbt_map[idx][idx2] = (idx * 2) + (idx2 & 1);
+        }
+      }
+
+      //Now shuffle (rotate) the columns randomly.
+      for (idx2 = 0; idx2 < MAX_COL/2; idx2 ++)
+      {
+        shift = rnd(COLOR_CHANNELS/2);
+
+        for (idx = 0; idx < MAX_ROW/2; idx ++) //save the column
+          temp[idx] = tbt_map[idx][idx2];
+
+        for (idx = 0; idx < MAX_ROW/2; idx ++)
+        {
+          idx3 = idx + shift;
+          if (idx3 >= MAX_ROW/2) idx3 -= MAX_ROW/2;
+
+          tbt_map[idx3][idx2] = temp[idx];
+        }
+      }
+    }
+  }
+
+  tbt_frames ++;
+
+  for (idx = 0; idx < MAX_ROW/2; idx ++)
+  {     rw = idx * 2;
+
+    for (idx2 = 0; idx2 < PANEL_COL; idx2 ++)
+    {
+      cl   = (idx2*2)+side_offset*2;
+      idx3 = tbt_map[idx][idx2+side_offset];
+
+      //Get the base color for this 2x2
+      color = rainbow[chan_clr[idx3]];
+      get_rgb(color, &r, &g, &b);
+
+      //Scale the brightness to the current channel intensity
+      cv = chan_val[idx3];
+      r = (r * cv) >> 8;
+      g = (g * cv) >> 8;
+      b = (b * cv) >> 8;
+
+      idx3 = col[rw][cl];
+      led[idx3].r = r;
+      led[idx3].g = g;
+      led[idx3].b = b;
+
+      idx3 = col[rw][cl+1];
+      led[idx3].r = r;
+      led[idx3].g = g;
+      led[idx3].b = b;
+
+      idx3 = col[rw+1][cl];
+      led[idx3].r = r;
+      led[idx3].g = g;
+      led[idx3].b = b;
+
+      idx3 = col[rw+1][cl+1];
+      led[idx3].r = r;
+      led[idx3].g = g;
+      led[idx3].b = b;
+    }
+  }
+}
+
+
 #pragma CODE_SECTION(color_bars, "ramCode")
 
 //This function creates a simple color organ display with one row of LEDs
@@ -441,20 +552,21 @@ void color_bars(uint16_t side, uint16_t *chan_val)
       }
     }
   }
-
-//  wait_for_sync(1);
 }
 
 
-#define HIGH_PASS     0x10
+#define HIGH_PASS     0x08
 #pragma CODE_SECTION(color_organ_prep, "ramCode")
 
 //This function prepares the FFT output bins for the display routines.
 void color_organ_prep(float *fft_bin, uint16_t *chan_val)
 {
   uint16_t idx, idx2, idx3, end;
-  float  temp, max;
-  float  maxlo, maxmid, maxhi;
+  float    temp, max;
+  float    maxlo, maxmid, maxhi;
+#ifdef OLD_STYLE_BULBS
+  uint16_t prev_cv[COLOR_CHANNELS];
+#endif
 
   idx3  = 1;
   maxhi = 0;
@@ -463,6 +575,11 @@ void color_organ_prep(float *fft_bin, uint16_t *chan_val)
 
   for (idx = 0; idx < COLOR_CHANNELS; idx++)
   {
+#ifdef OLD_STYLE_BULBS
+    //Save off the last frame's value
+    prev_cv[idx] = chan_val[idx];
+#endif
+
     max = 0;
     end = chan_bin[idx+1]; //this depends on one extra entry in the array
 
@@ -531,6 +648,18 @@ void color_organ_prep(float *fft_bin, uint16_t *chan_val)
       chan_val[idx] /= temp;
     }
   }
+
+#ifdef OLD_STYLE_BULBS
+  //Incandescent bulbs cannot flash at 15 or 30Hhz. Apply a fading factor to
+  //slow the LEDs down a bit. We don't want to put people into a trance... ;^)
+  for (idx = 0; idx < COLOR_CHANNELS; idx++)
+  {
+    //If the new value is less than half, set it to half instead.
+    if (chan_val[idx] < (prev_cv[idx] >> 1))
+      chan_val[idx] = prev_cv[idx] >> 1;
+
+  }
+#endif
 }
 
 

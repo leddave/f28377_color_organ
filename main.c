@@ -1,5 +1,5 @@
 /*****************************************************************************
- * This is the rgb_f28377 project source.
+ * This is the f28377_color_organ project source.
  *****************************************************************************/
 #include <stdio.h>
 #include <string.h>
@@ -114,13 +114,16 @@ __cregister volatile unsigned int IER;
 
 extern volatile uint16_t frame_sync;
 extern uint32_t frame_cnt;
+extern uint16_t end_of_gap;
+extern uint16_t peak_flag;
 
 
 //This Timer1 ISR is programmed to expire at the frame rate.
 #pragma CODE_SECTION(timer1_isr, "ramCode")
 __interrupt void timer1_isr(void)
 {
-  frame_start = 1;
+  frame_start = 1; //used by the main loop to start frame processing
+  frame_sync = 1;  //used by other display routines to throttle updates
   frame_cnt ++;
 }
 
@@ -253,6 +256,7 @@ void initialize(void)
 
   led_driver_init();
   display_init();
+  beat_init();
   fft_init();
   init_rnd(23094);
 
@@ -265,6 +269,7 @@ void initialize(void)
 
 int main(void)
 {
+  uint16_t display = 0;
 
   //The init function must be called prior to flash copies that will fail
   //if the watchdog timer expires prior to the memcpy completion. The init
@@ -326,11 +331,31 @@ int main(void)
       frame_state = FRAME_PREP_DISPLAY_DATA;
       color_organ_prep(RFFTmagBuff1, chan_max_left);
       color_organ_prep(RFFTmagBuff2, chan_max_right);
+      beat_detect_prep();
+
 
       //Create a display with the data. There could be logic here to use
       //the output of beat detection to periodically change display routines.
-      color_bars(LEFT,  chan_max_left);
-      color_bars(RIGHT, chan_max_right);
+
+      if (end_of_gap)
+      {
+        display ++;
+        if (display == 2)
+          display = 0;
+      }
+
+      switch (display)
+      {
+        case 0:
+          color_bars(LEFT,  chan_max_left);
+          color_bars(RIGHT, chan_max_right);
+          break;
+
+        case 1:
+          two_by_two(LEFT,  peak_flag, chan_max_left);
+          two_by_two(RIGHT, peak_flag, chan_max_right);
+          break;
+      };
 
       frame_state = FRAME_SENDING_LED_DATA;
       led_driver();

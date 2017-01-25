@@ -5,6 +5,8 @@
 
 
 
+void beat_init(void);
 void beat_detect(void);
+void beat_detect_prep(void);
 
 #endif
