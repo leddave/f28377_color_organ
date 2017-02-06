@@ -409,6 +409,17 @@ void pixel_up(void)
 }
 
 
+#pragma CODE_SECTION(moving_dots, "ramCode")
+
+//This function creates a display where each LED is initially assigned a random
+//channel number. Pixels are slowly swapped so that low channel pixels sink and
+//high channel pixels rise.  Once no more swaps are possible, the display is
+//reset after holding for several seconds.
+void moving_dots(uint16_t side, uint16_t peak_flag, uint16_t *chan_val)
+{
+}
+
+
 #pragma CODE_SECTION(two_by_two, "ramCode")
 
 #define MIN_TBT_FRAMES                (FRAMES_PER_SEC * 4)
@@ -436,7 +447,7 @@ void two_by_two(uint16_t side, uint16_t peak_flag, uint16_t *chan_val)
   {
     tbt_frames = 0;
 
-    //Create a new random arrangement of 2x2s.
+    //Create a new random arrangement of 2x2s (for both LEFT and RIGHT sides).
     if (side == LEFT)
     {
       //First, create a linear arrangement to guarantee equal channel distribution
@@ -555,6 +566,7 @@ void color_bars(uint16_t side, uint16_t *chan_val)
 }
 
 
+#define HIGH_BIAS     0x28
 #define HIGH_PASS     0x08
 #pragma CODE_SECTION(color_organ_prep, "ramCode")
 
@@ -617,6 +629,10 @@ void color_organ_prep(float *fft_bin, uint16_t *chan_val)
       chan_val[idx] = 0;
   }
 
+  //Since the highest channel registers lower with the same signal strength
+  //give it a boost if it's not zero.
+  if (chan_val[COLOR_CHANNELS-1] > 0)
+    chan_val[COLOR_CHANNELS-1] += HIGH_BIAS;
 
   //Scale the data to the maximum component RGB value.
   if (maxlo > (float)MAX_RGB_VAL)
@@ -650,7 +666,7 @@ void color_organ_prep(float *fft_bin, uint16_t *chan_val)
   }
 
 #ifdef OLD_STYLE_BULBS
-  //Incandescent bulbs cannot flash at 15 or 30Hhz. Apply a fading factor to
+  //Incandescent bulbs cannot flash at 15 or 30Hz. Apply a fading factor to
   //slow the LEDs down a bit. We don't want to put people into a trance... ;^)
   for (idx = 0; idx < COLOR_CHANNELS; idx++)
   {

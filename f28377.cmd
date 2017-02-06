@@ -1,7 +1,7 @@
 // See F2807x_Headers__nonBIOS.cmd for all register areas
 -x
--stack 0x800
--heap  0x800
+-stack 0x400
+-heap  0x100
 
 // F28377 Memory Layout:
 // Dedicated RAM (CPU Only):    0x000000 - 0x0007ff    (2K:  M0, M1)
@@ -22,14 +22,17 @@
 MEMORY
 {
     PAGE 0:
-    PROG_MEM1   :   origin = 0x00000000  length = 0x00000800
+    PROG_MEM0   :   origin = 0x00000122  length = 0x000002DE
     CLA_RAM     :   origin = 0x00001480  length = 0x00000100
     UPP_RAM     :   origin = 0x00006c00  length = 0x00000400
-    PROG_MEM3   :   origin = 0x00008000  length = 0x00010000
+    PROG_MEM1   :   origin = 0x00008000  length = 0x00010000
     CANA_RAM    :   origin = 0x00049000  length = 0x00000800
     CANB_RAM    :   origin = 0x0004b000  length = 0x00000800
+    RESET       :   origin = 0x003FFFC0, length = 0x00000002
 
     PAGE 1:
+    BOOT_RSVD   :   origin = 0x00000002  length = 0x00000120 /* Part of M0, BOOT rom will use this for stack */
+    STACK       :   origin = 0x00000400  length = 0x00000400
     ADCA_RESULT :   origin = 0x00000b00  length = 0x00000020
     ADCB_RESULT :   origin = 0x00000b20  length = 0x00000020
     CPU_TIMER0  :   origin = 0x00000c00  length = 0x00000008
@@ -37,6 +40,7 @@ MEMORY
     CPU_TIMER2  :   origin = 0x00000c10  length = 0x00000008
     PIE_CTRL    :   origin = 0x00000CE0  length = 0x00000020     /* PIE control registers */
     PIE_VECT    :   origin = 0x00000D00  length = 0x00000200     /* PIE Vector Table */
+    WD_REGS     :   origin = 0x00007000  length = 0x00000040
     ADCA_REGS   :   origin = 0x00007400  length = 0x00000080
     ADCB_REGS   :   origin = 0x00007480  length = 0x00000080
     ADCC_REGS   :   origin = 0x00007500  length = 0x00000080
@@ -55,7 +59,6 @@ MEMORY
     FLASH0_ECC  :   origin = 0x0005FB00  length = 0x00000040
     FLASH1_CTRL :   origin = 0x0005Fc00  length = 0x00000300
     FLASH1_ECC  :   origin = 0x0005Ff00  length = 0x00000040
-    FLASH_ROM   :   origin = 0x00080002  length = 0x0007fffe
     BOOT_ROM    :   origin = 0x003f8000  length = 0x00007fbe
     VECTORS     :   origin = 0x003fffbe  length = 0x00000042
 }
@@ -63,13 +66,13 @@ MEMORY
 SECTIONS
 {
     /* PAGE 0 */
-    .text:      >   PROG_MEM3     PAGE=0
-    .cinit:     >   PROG_MEM3     PAGE=0
-    .reset:     >   PROG_MEM1     PAGE=0
+    .text:      >   PROG_MEM1     PAGE=0
+    .cinit:     >   PROG_MEM1     PAGE=0
+    .reset:     >   RESET,        PAGE=0, TYPE = DSECT /* not used */
+    .heap:      >   CANB_RAM      PAGE=0
 
     /* PAGE 1 */
-    .stack:     >   CANA_RAM      PAGE=0
-    .heap:      >   CANB_RAM      PAGE=0
+    .stack:     >   STACK         PAGE=1
     .system:    >   DATA1         PAGE=1
     .bss:       >   DATA1         PAGE=1
     .sysmem:    >   DATA1         PAGE=1
@@ -81,6 +84,7 @@ SECTIONS
     .Timer2Ctrl: >  CPU_TIMER2    PAGE=1
     .GpioCtrl:  >   GPIO_CTRL     PAGE=1
     .GpioData:  >   GPIO_DATA     PAGE=1
+    .WdReg:     >   WD_REGS       PAGE=1
     .AdcA:      >   ADCA_REGS     PAGE=1
     .AdcB:      >   ADCB_REGS     PAGE=1
     .AdcC:      >   ADCC_REGS     PAGE=1
@@ -105,8 +109,8 @@ SECTIONS
     .ebss:      >   DATA1         PAGE=1
     .econst:    >   DATA1         PAGE=1
 
-    codestart:  >   PROG_MEM3     PAGE=0
-    ramCode:    >   PROG_MEM3     PAGE=0
+    codestart:  >   PROG_MEM1     PAGE=0
+    ramCode:    >   PROG_MEM1     PAGE=0
     ramConsts:  >   DATA1         PAGE=1
     data:       >   DATA1         PAGE=1
 

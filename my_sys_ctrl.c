@@ -18,38 +18,58 @@
 #include "F2837xS_device.h"     // Headerfile Include File
 #include "F2837xS_Examples.h"   // Examples Include File
 
-// Functions that will be run from RAM need to be assigned to
-// a different section.  This section will then be mapped to a load and
-// run address using the linker cmd file.
-//
-//  *IMPORTANT*
-//  IF RUNNING FROM FLASH, PLEASE COPY OVER THE SECTION "ramfuncs"  FROM FLASH
-//  TO RAM PRIOR TO CALLING InitSysCtrl(). THIS PREVENTS THE MCU FROM THROWING
-//  AN EXCEPTION WHEN A CALL TO DELAY_US() IS MADE.
-//
-//#pragma CODE_SECTION(InitFlash_Bank0, "ramfuncs");
-//#pragma CODE_SECTION(InitFlash_Bank1, "ramfuncs");
-//#pragma CODE_SECTION(FlashOff_Bank0, "ramfuncs");
-//#pragma CODE_SECTION(FlashOff_Bank1, "ramfuncs");
 
 void InitPeripheralClocks();
 void InitSysPll(Uint16 clock_source, Uint16 imult, Uint16 fmult, Uint16 divsel);
 
+extern volatile struct WD_REGS WdRegs;
+
+#ifdef FLASH
+extern unsigned int ramCode_loadstart;
+extern unsigned int ramCode_loadsize;
+extern unsigned int ramCode_runstart;
+
+extern unsigned int ramConsts_loadstart;
+extern unsigned int ramConsts_loadsize;
+extern unsigned int ramConsts_runstart;
+#endif
+
+
+void DisableDog(void)
+{
+    volatile Uint16 temp;
+
+    // Grab the clock config first so we don't clobber it
+    EALLOW;
+    temp = WdRegs.WDCR.all & 0x0007;
+    WdRegs.WDCR.all = 0x0068 | temp;
+    EDIS;
+}
+
 void InitSysCtrl(void)
 {
     // Disable the watchdog
-//    DisableDog();
+    DisableDog();
 
-#ifdef _FLASH
-// Copy time critical code and Flash setup code to RAM
-// This includes the following functions:  InitFlash();
-// The  RamfuncsLoadStart, RamfuncsLoadSize, and RamfuncsRunStart
-// symbols are created by the linker. Refer to the device .cmd file.
-    memcpy(&RamfuncsRunStart, &RamfuncsLoadStart, (size_t)&RamfuncsLoadSize);
+#ifdef FLASH
+  // Copy time critical code and Flash setup code to RAM
+  // This includes the following functions:  InitFlash();
+  // The  RamfuncsLoadStart, RamfuncsLoadSize, and RamfuncsRunStart
+  // symbols are created by the linker. Refer to the device .cmd file.
 
-// Call Flash Initialization to setup flash waitstates
-// This function must reside in RAM
-    InitFlash_Bank0();
+  memcpy(&ramCode_runstart,
+         &ramCode_loadstart,
+         (uint32_t)&ramCode_loadsize);
+
+  /* Copy often used constants from FLASH_B to ram. */
+  memcpy(&ramConsts_runstart,
+         &ramConsts_loadstart,
+         (uint32_t)&ramConsts_loadsize);
+
+  // Call Flash Initialization to setup flash waitstates
+  // This function must reside in RAM
+  InitFlash_Bank0();
+  InitFlash_Bank1();
 #endif
 
     // *IMPORTANT*
@@ -91,16 +111,13 @@ void InitSysCtrl(void)
     // F28_PLLCR and F28_CLKINDIV are defined in F2837xS_Examples.h
     // Note: The internal oscillator CANNOT be used as the PLL source if the
     // PLLSYSCLK is configured to frequencies above 194 MHz.
-//#ifdef _LAUNCHXL_F28377S
+
     InitSysPll(XTAL_OSC,IMULT_40,FMULT_0,PLLCLK_BY_2);      //PLLSYSCLK = (XTAL_OSC) * (IMULT + FMULT) / (PLLSYSCLKDIV)
-//#else
-//    InitSysPll(XTAL_OSC,IMULT_20,FMULT_0,PLLCLK_BY_2);      //PLLSYSCLK = (XTAL_OSC) * (IMULT + FMULT) / (PLLSYSCLKDIV)
-//#endif
 
     //Turn on all peripherals
     InitPeripheralClocks();
-
 }
+
 
 void InitPeripheralClocks()
 {
@@ -186,6 +203,7 @@ void InitPeripheralClocks()
     EDIS;
 }
 
+
 void DisablePeripheralClocks()
 {
     EALLOW;
@@ -242,19 +260,8 @@ void InitFlash_Bank0(void)
     //Minimum waitstates required for the flash operating
     //at a given CPU rate must be characterized by TI.
     //Refer to the datasheet for the latest information.
-//    #if CPU_FRQ_200MHZ
+
     Flash0CtrlRegs.FRDCNTL.bit.RWAIT = 0x3;
-//    #endif
-
-#if 0
-    #if CPU_FRQ_150MHZ
-    Flash0CtrlRegs.FRDCNTL.bit.RWAIT = 0x2;
-    #endif
-
-    #if CPU_FRQ_120MHZ
-    Flash0CtrlRegs.FRDCNTL.bit.RWAIT = 0x2;
-    #endif
-#endif
 
     //Enable Cache and prefetch mechanism to improve performance
     //of code executed from Flash.
@@ -271,8 +278,8 @@ void InitFlash_Bank0(void)
     //the last register configured occurs before returning.
 
     __asm(" RPT #7 || NOP");
-
 }
+
 
 //---------------------------------------------------------------------------
 // Example: InitFlash_Bank1
@@ -307,19 +314,8 @@ void InitFlash_Bank1(void)
     //Minimum waitstates required for the flash operating
     //at a given CPU rate must be characterized by TI.
     //Refer to the datasheet for the latest information.
-//    #if CPU_FRQ_200MHZ
+
     Flash1CtrlRegs.FRDCNTL.bit.RWAIT = 0x3;
-//    #endif
-
-#if 0
-    #if CPU_FRQ_150MHZ
-    Flash1CtrlRegs.FRDCNTL.bit.RWAIT = 0x2;
-    #endif
-
-    #if CPU_FRQ_120MHZ
-    Flash1CtrlRegs.FRDCNTL.bit.RWAIT = 0x2;
-    #endif
-#endif
 
     //Enable Cache and prefetch mechanism to improve performance
     //of code executed from Flash.
@@ -336,88 +332,8 @@ void InitFlash_Bank1(void)
     //the last register configured occurs before returning.
 
     __asm(" RPT #7 || NOP");
-
 }
 
-#if 0
-//---------------------------------------------------------------------------
-// Example: SeizeFlashPump_Bank0():
-//---------------------------------------------------------------------------
-// Wait until the flash pump for bank0 is available, then take control of it
-// using the flash pump Semaphore.
-
-void SeizeFlashPump_Bank0()
-{
-    EALLOW;
-
-    while (FlashPumpSemaphoreRegs.PUMPREQUEST.bit.PUMP_OWNERSHIP != 0x2)
-    {
-        FlashPumpSemaphoreRegs.PUMPREQUEST.all = IPC_PUMP_KEY | 0x2;
-    }
-
-    EDIS;
-}
-
-//---------------------------------------------------------------------------
-// Example: SeizeFlashPump_Bank1():
-//---------------------------------------------------------------------------
-// Wait until the flash pump for bank1 is available, then take control of it
-// using the flash pump Semaphore.
-
-void SeizeFlashPump_Bank1()
-{
-    EALLOW;
-
-    while (FlashPumpSemaphoreRegs.PUMPREQUEST.bit.PUMP_OWNERSHIP != 0x1)
-    {
-        FlashPumpSemaphoreRegs.PUMPREQUEST.all = IPC_PUMP_KEY | 0x1;
-    }
-
-    EDIS;
-}
-
-//---------------------------------------------------------------------------
-// Example: ReleaseFlashPump():
-//---------------------------------------------------------------------------
-//Release control of the flash pump using the flash pump semaphore
-
-void ReleaseFlashPump()
-{
-    EALLOW;
-    FlashPumpSemaphoreRegs.PUMPREQUEST.all = IPC_PUMP_KEY | 0x0;
-    EDIS;
-}
-#endif
-
-//---------------------------------------------------------------------------
-// Example: ServiceDog:
-//---------------------------------------------------------------------------
-// This function resets the watchdog timer.
-// Enable this function for using ServiceDog in the application
-#if 0
-void ServiceDog(void)
-{
-    EALLOW;
-    WdRegs.WDKEY.bit.WDKEY = 0x0055;
-    WdRegs.WDKEY.bit.WDKEY = 0x00AA;
-    EDIS;
-}
-
-//---------------------------------------------------------------------------
-// Example: DisableDog:
-//---------------------------------------------------------------------------
-// This function disables the watchdog timer.
-
-void DisableDog(void)
-{
-    volatile Uint16 temp;
-    EALLOW;
-    //Grab the clock config so we don't clobber it
-    temp = WdRegs.WDCR.all & 0x0007;
-    WdRegs.WDCR.all = 0x0068 | temp;
-    EDIS;
-}
-#endif
 
 //---------------------------------------------------------------------------
 // Example: InitPll:
@@ -510,140 +426,6 @@ void InitSysPll(Uint16 clock_source, Uint16 imult, Uint16 fmult, Uint16 divsel)
     EDIS;
 }
 
-//---------------------------------------------------------------------------
-// Example: InitPll2:
-//---------------------------------------------------------------------------
-// This function initializes the PLL2 registers.
-//
-// Note: The internal oscillator CANNOT be used as the PLL source if the
-// PLLSYSCLK is configured to frequencies above 194 MHz.
-#if 0
-void InitAuxPll(Uint16 clock_source, Uint16 imult, Uint16 fmult, Uint16 divsel)
-{
-    Uint16 temp_divsel;
-
-    if((clock_source == ClkCfgRegs.CLKSRCCTL2.bit.AUXOSCCLKSRCSEL)   &&
-      (imult         == ClkCfgRegs.AUXPLLMULT.bit.IMULT)          &&
-      (fmult         == ClkCfgRegs.AUXPLLMULT.bit.FMULT)          &&
-      (divsel        == ClkCfgRegs.AUXCLKDIVSEL.bit.AUXPLLDIV))
-    {
-        //everything is set as required, so just return
-        return;
-    }
-
-    switch (clock_source)
-    {
-
-        case INT_OSC2:
-            AuxIntOsc2Sel();
-            break;
-
-        case XTAL_OSC:
-            AuxXtalOscSel();
-            break;
-
-        case AUXCLKIN:
-            AuxAuxClkSel();
-            break;
-
-    }
-
-   // Change the SYSPLL Integer Multiplier (or) SYSPLL Fractional Multiplier
-   if(ClkCfgRegs.AUXPLLMULT.bit.IMULT != imult || ClkCfgRegs.AUXPLLMULT.bit.FMULT !=fmult)
-   {
-       EALLOW;
-       ClkCfgRegs.AUXCLKDIVSEL.bit.AUXPLLDIV = AUXPLLRAWCLK_BY_8;
-       ClkCfgRegs.AUXPLLMULT.bit.IMULT = imult;     //Setting integer multiplier
-       ClkCfgRegs.AUXPLLMULT.bit.FMULT = fmult;     //Setting fractional multiplier
-       ClkCfgRegs.AUXPLLCTL1.bit.PLLEN = 1;         //Enable AUXPLL
-       EDIS;
-
-       //Wait for the AUXPLL lock
-       while(ClkCfgRegs.AUXPLLSTS.bit.LOCKS != 1)
-       {
-            // Uncomment to service the watchdog
-            // ServiceDog();
-       }
-   }
-
-     //increase the freq. of operation in steps to avoid any VDD fluctuations
-     temp_divsel = AUXPLLRAWCLK_BY_8;
-     while(ClkCfgRegs.AUXCLKDIVSEL.bit.AUXPLLDIV != divsel)
-     {
-         EALLOW;
-         ClkCfgRegs.AUXCLKDIVSEL.bit.AUXPLLDIV = temp_divsel - 1;
-         EDIS;
-
-         temp_divsel = temp_divsel - 1;
-         if(ClkCfgRegs.AUXCLKDIVSEL.bit.AUXPLLDIV != divsel)
-         {
-             DELAY_US(15L);
-         }
-     }
-
-   EALLOW;
-   ClkCfgRegs.AUXPLLCTL1.bit.PLLCLKEN = 1;          //Enable AUXPLLCLK is fed from AUX PLL
-   EDIS;
-}
-
-//---------------------------------------------------------------------------
-// Example: CsmUnlock:
-//---------------------------------------------------------------------------
-// This function unlocks the CSM. User must replace 0xFFFF's with current
-// password for the DSP. Returns 1 if unlock is successful.
-
-#define STATUS_FAIL          0
-#define STATUS_SUCCESS       1
-
-Uint16 CsmUnlock()
-{
-    volatile Uint16 temp;
-
-    // Load the key registers with the current password. The 0xFFFF's are dummy
-    // passwords.  User should replace them with the correct password for the DSP.
-
-    EALLOW;
-//    CsmRegs.KEY0 = 0xFFFF;
-//    CsmRegs.KEY1 = 0xFFFF;
-//    CsmRegs.KEY2 = 0xFFFF;
-//    CsmRegs.KEY3 = 0xFFFF;
-//    CsmRegs.KEY4 = 0xFFFF;
-//    CsmRegs.KEY5 = 0xFFFF;
-//    CsmRegs.KEY6 = 0xFFFF;
-//    CsmRegs.KEY7 = 0xFFFF;
-
-    DcsmZ1Regs.Z1_CSMKEY0 = 0xFFFFFFFF;
-    DcsmZ1Regs.Z1_CSMKEY1 = 0xFFFFFFFF;
-    DcsmZ1Regs.Z1_CSMKEY2 = 0xFFFFFFFF;
-    DcsmZ1Regs.Z1_CSMKEY3  = 0xFFFFFFFF;
-
-    DcsmZ2Regs.Z2_CSMKEY0 = 0xFFFFFFFF;
-    DcsmZ2Regs.Z2_CSMKEY1 = 0xFFFFFFFF;
-    DcsmZ2Regs.Z2_CSMKEY2 = 0xFFFFFFFF;
-    DcsmZ2Regs.Z2_CSMKEY3  = 0xFFFFFFFF;
-    EDIS;
-
-    // Perform a dummy read of the password locations
-    // if they match the key values, the CSM will unlock
-
-//    temp = CsmPwl.PSWD0;
-//    temp = CsmPwl.PSWD1;
-//    temp = CsmPwl.PSWD2;
-//    temp = CsmPwl.PSWD3;
-//    temp = CsmPwl.PSWD4;
-//    temp = CsmPwl.PSWD5;
-//    temp = CsmPwl.PSWD6;
-//    temp = CsmPwl.PSWD7;
-
-    // If the CSM unlocked, return succes, otherwise return
-    // failure.
-//    if (CsmRegs.CSMSCR.bit.SECURE == 0) return STATUS_SUCCESS;
-//    else return STATUS_FAIL;
-
-    return 0;
-
-}
-#endif
 
 //---------------------------------------------------------------------------
 // Example: SysIntOsc1Sel:
@@ -690,98 +472,3 @@ void SysXtalOscSel (void)  {
     EDIS;
 
 }
-
-#if 0
-//---------------------------------------------------------------------------
-// Example: AuxIntOsc2Sel:
-//---------------------------------------------------------------------------
-// This function switches to Internal oscillator 2 from External Oscillator
-// and turns off all other clock sources to minimize power consumption
-// NOTE: If there is no external clock connection, when switching from
-//       INTOSC1 to INTOSC2, EXTOSC and XLCKIN must be turned OFF prior
-//       to switching to internal oscillator 1
-
-void AuxIntOsc2Sel (void) {
-
-    EALLOW;
-    ClkCfgRegs.CLKSRCCTL1.bit.INTOSC2OFF=0;     // Turn on INTOSC2
-    ClkCfgRegs.CLKSRCCTL2.bit.AUXOSCCLKSRCSEL = 0; // Clk Src = INTOSC2
-    EDIS;
-
-}
-
-//---------------------------------------------------------------------------
-// Example: AuxXtalOscSel:
-//---------------------------------------------------------------------------
-// This function switches to External CRYSTAL oscillator and turns off all other clock
-// sources to minimize power consumption. This option may not be available on all
-// device packages
-
-void AuxXtalOscSel (void)  {
-
-    EALLOW;
-    ClkCfgRegs.CLKSRCCTL1.bit.XTALOFF=0;        // Turn on XTALOSC
-    ClkCfgRegs.CLKSRCCTL2.bit.AUXOSCCLKSRCSEL = 1; // Clk Src = XTAL
-    EDIS;
-
-}
-
-//---------------------------------------------------------------------------
-// Example: AuxAUXCLKOscSel:
-//---------------------------------------------------------------------------
-// This function switches to External CRYSTAL oscillator and turns off all other clock
-// sources to minimize power consumption. This option may not be available on all
-// device packages
-
-void AuxAuxClkSel (void)  {
-
-    EALLOW;
-    ClkCfgRegs.CLKSRCCTL2.bit.AUXOSCCLKSRCSEL = 2; // Clk Src = XTAL
-    EDIS;
-
-}
-
-
-//Enter IDLE mode
-void IDLE()
-{
-    EALLOW;
-    CpuSysRegs.LPMCR.bit.LPM = LPM_IDLE;
-    EDIS;
-    asm(" IDLE");
-}
-
-//Enter STANDBY mode
-void STANDBY()
-{
-    EALLOW;
-    CpuSysRegs.LPMCR.bit.LPM = LPM_STANDBY;
-    EDIS;
-    asm(" IDLE");
-}
-
-//Enter HALT mode
-void HALT()
-{
-    EALLOW;
-    CpuSysRegs.LPMCR.bit.LPM = LPM_HALT;
-    ClkCfgRegs.SYSPLLCTL1.bit.PLLCLKEN = 0;
-    ClkCfgRegs.SYSPLLCTL1.bit.PLLEN = 0;
-    EDIS;
-    asm(" IDLE");
-}
-
-//Enter HIB mode
-void HIB()
-{
-    EALLOW;
-    CpuSysRegs.LPMCR.bit.LPM = LPM_HIB;
-    EDIS;
-    DisablePeripheralClocks();
-    EALLOW;
-    ClkCfgRegs.SYSPLLCTL1.bit.PLLCLKEN = 0;
-    ClkCfgRegs.SYSPLLCTL1.bit.PLLEN = 0;
-    EDIS;
-    asm(" IDLE");
-}
-#endif

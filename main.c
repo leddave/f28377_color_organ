@@ -13,15 +13,14 @@
 #include "rfft.h"
 #include "beat.h"
 
-//for debug:
-#include "math.h"
-
 #ifdef FLASH
 //the current f2837xS Flash API header:
 #include "F021_F2837xS_C28x.h"
 #endif
 
 //Global variables (register overlays)
+#pragma DATA_SECTION(WdRegs,".WdReg");
+volatile struct WD_REGS WdRegs;
 
 #pragma DATA_SECTION(CpuTimer0Regs,".Timer0Ctrl");
 volatile struct CPUTIMER_REGS CpuTimer0Regs;
@@ -48,7 +47,6 @@ volatile struct INPUT_XBAR_REGS InputXbarRegs;
 #pragma DATA_SECTION(ClkCfgRegs,".ClkCfg");
 volatile struct CLK_CFG_REGS ClkCfgRegs;
 
-#if 0
 #pragma DATA_SECTION(Flash0EccRegs,".Flash0Ecc");
 volatile struct FLASH_ECC_REGS Flash0EccRegs;
 #pragma DATA_SECTION(Flash0CtrlRegs,".Flash0Ctrl");
@@ -57,9 +55,6 @@ volatile struct FLASH_CTRL_REGS Flash0CtrlRegs;
 volatile struct FLASH_ECC_REGS Flash1EccRegs;
 #pragma DATA_SECTION(Flash1CtrlRegs,".Flash1Ctrl");
 volatile struct FLASH_CTRL_REGS Flash1CtrlRegs;
-#pragma DATA_SECTION(FlashPumpSemaphoreRegs,".FlashPump");
-volatile struct FLASH_PUMP_SEMAPHORE_REGS FlashPumpSemaphoreRegs;
-#endif
 
 #pragma DATA_SECTION(CpuSysRegs,".CpuSys");
 volatile struct CPU_SYS_REGS CpuSysRegs;
@@ -76,24 +71,6 @@ volatile struct ADC_REGS AdccRegs;
 volatile struct ADC_REGS AdcdRegs;
 #pragma DATA_SECTION(AdcaResult,".AdcaResult");
 volatile uint16_t AdcaResult[2];
-
-#if 0
-#pragma DATA_SECTION(Flash_CPUScaleFactor, "FlashScalingVar");
-uint32_t Flash_CPUScaleFactor;
-
-#pragma DATA_SECTION(Flash_CallbackPtr, "FlashCallbackVar");
-void (*Flash_CallbackPtr) (void);
-#endif
-
-#ifdef FLASH
-extern unsigned int ramCode_loadstart;
-extern unsigned int ramCode_loadsize;
-extern unsigned int ramCode_runstart;
-
-extern unsigned int ramConsts_loadstart;
-extern unsigned int ramConsts_loadsize;
-extern unsigned int ramConsts_runstart;
-#endif
 
 extern uint16_t RFFTin1Buff[2*RFFT_SIZE];
 extern float RFFTmagBuff1[RFFT_SIZE/2+1];
@@ -119,7 +96,6 @@ extern uint16_t peak_flag;
 
 
 //This Timer1 ISR is programmed to expire at the frame rate.
-#pragma CODE_SECTION(timer1_isr, "ramCode")
 __interrupt void timer1_isr(void)
 {
   frame_start = 1; //used by the main loop to start frame processing
@@ -130,8 +106,7 @@ __interrupt void timer1_isr(void)
 
 //The ISR will store each sampled value in the FFT buffer, and
 //raise the flag once the buffer is full.
-#pragma CODE_SECTION(timer2_isr, "ramCode")
-__interrupt void timer2_isr()
+__interrupt void timer2_isr(void)
 {
   adc_sample(sample_count++);
   if (sample_count == (RFFT_SIZE - 1))
@@ -141,7 +116,7 @@ __interrupt void timer2_isr()
   }
 
   AdcaRegs.ADCINTFLGCLR.bit.ADCINT1 = 1; //clear INT1 flag
-//  PieCtrlRegs.PIEACK.all = PIEACK_GROUP1;
+  PieCtrlRegs.PIEACK.all = PIEACK_GROUP1;
 }
 
 
@@ -166,16 +141,6 @@ void chip_init(void)
   // Initialize System Control:
   InitSysCtrl();
 
-  //Initialize the Flash API
-#if 0
-//this is for f28027:
-//#ifdef FLASH
-  EALLOW;
-  Flash_CPUScaleFactor = SCALE_FACTOR;
-  Flash_CallbackPtr = NULL;
-  EDIS;
-#endif
-
   // Initialize GPIO:
   InitGpio();
 
@@ -198,7 +163,6 @@ void timer_init(void)
   // Initialize the PIE control registers to their default state.
   // The default state is all PIE interrupts disabled and flags
   // are cleared.
-  // This function is found in the F2807x_PieCtrl.c file.
   InitPieCtrl();
 
   // Disable CPU interrupts and clear all CPU interrupt flags:
@@ -210,7 +174,6 @@ void timer_init(void)
   // This will populate the entire table, even if the interrupt
   // is not used in this example.  This is useful for debug purposes.
   // The shell ISR routines are found in F2807x_DefaultIsr.c.
-  // This function is found in F2807x_PieVect.c.
   InitPieVectTable();
 
   // Interrupts that are used in this example are re-mapped to
@@ -266,7 +229,6 @@ void initialize(void)
 }
 
 
-
 int main(void)
 {
   uint16_t display = 0;
@@ -275,20 +237,6 @@ int main(void)
   //if the watchdog timer expires prior to the memcpy completion. The init
   //function will disable the watchdog.
   initialize();
-
-#ifdef FLASH
-  /* Copy the ramCode section from FLASH_A to ram. */
-  memcpy(&ramCode_runstart,
-         &ramCode_loadstart,
-         (uint32_t)&ramCode_loadsize);
-
-  /* Copy often used constants from FLASH_B to ram. */
-  memcpy(&ramConsts_runstart,
-         &ramConsts_loadstart,
-         (uint32_t)&ramConsts_loadsize);
-
-//FPU_initFlash();
-#endif
 
 
 //  initial_display();
@@ -344,6 +292,8 @@ int main(void)
           display = 0;
       }
 
+//For now, fix the display on 2x2 until we figure out a good time to change.
+display = 1;
       switch (display)
       {
         case 0:
