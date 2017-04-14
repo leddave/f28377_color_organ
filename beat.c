@@ -4,18 +4,21 @@
 #include <stdio.h>
 #include <string.h>
 #include "globals.h"
+#include "utils.h"
 #include "beat.h"
 
 #define GAP_LENGTH                     (FRAMES_PER_SEC * 3)
+#define GAP_LENGTH_LONG                (FRAMES_PER_SEC * 8) /* a gap longer than nornal inter-song time */
 #define MAX_BPM                        200 /* beats per minute */
 #define PEAK_SPACING                  ((FRAMES_PER_SEC * 60) / MAX_BPM)
 
 //Locally defined globals:
-uint32_t gap_frames;
-uint16_t gap_found;
-uint16_t end_of_gap;
+volatile uint32_t gap_frames;
+volatile uint16_t gap_found;
+volatile uint16_t gap_long_found;
+volatile uint16_t end_of_gap;
+volatile uint16_t peak_flag;
 uint16_t ramp_frames;
-uint16_t peak_flag;
 uint32_t peak_last;
 int32_t  peak_threshold;
 uint16_t power_avg_idx;
@@ -37,6 +40,7 @@ void beat_init(void)
   power_avg  = 0;
   ramp_frames= 0;
   peak_threshold = 0;
+  gap_long_found = 0;
   power_avg_idx = PEAK_FRAMES-1;
   memset(power_avg_buff, 0, sizeof(power_avg_buff));
 }
@@ -105,8 +109,11 @@ void update_average_power(void)
     peak_threshold = power_avg + (power_avg >> 2);
 
     //See if this frame is a peak
-    if (sum >= peak_threshold)
-      peak_flag = 1;
+    if (sum > peak_threshold)
+    {
+      //The call to rnd() is a dummy call to better randomize the seed.
+      peak_flag = 1 + rnd(1);
+    }
 
     //If not enough frames have passed since the last peak, kill it.
     if (peak_flag)
@@ -151,6 +158,7 @@ void gap_detect(void)
     {
       gap_found = 0;
       end_of_gap = 1;
+      gap_long_found = 0;
     }
   }
 
@@ -158,6 +166,12 @@ void gap_detect(void)
   {
     //Once the gap is found the flag is not cleared until the gap ends.
     gap_found = 1;
+  }
+
+  if (gap_frames > GAP_LENGTH_LONG)
+  {
+    //Once the gap is found the flag is not cleared until the gap ends.
+    gap_long_found = 1;
   }
 }
 

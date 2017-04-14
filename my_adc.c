@@ -19,7 +19,6 @@
 extern volatile struct ADC_REGS AdcaRegs;
 
 extern volatile uint16_t AdcaResult[2];
-//extern uint16_t RFFTin1Buff[2*RFFT_SIZE];
 extern uint16_t RFFTinBuff1[RFFT_SIZE];
 extern uint16_t RFFTinBuff2[RFFT_SIZE];
 

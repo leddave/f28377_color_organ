@@ -23,8 +23,8 @@
 
 /* Define the maximum allowed (total) RGB LEDs. It should be a multiple of the
  * number of LED strings. */
-#ifdef TEST_ARRAY
-#define MAX_LEDS                       (56 * 4)
+#ifdef LARGE_ARRAY
+#define MAX_LEDS                       (288 * 4)
 #else
 #define MAX_LEDS                       (120 * 4)
 #endif

@@ -9,15 +9,15 @@
 
 #define DELAY1     6
 #define DELAY2     9
-#define DELAY3a    8
-#define DELAY3b    11
+#define DELAY3a    13
+#define DELAY3b    14
 
 #else //WS2812
 
 #define DELAY1     4
 #define DELAY2     4
-#define DELAY3a    0
-#define DELAY3b    0
+#define DELAY3a    1
+#define DELAY3b    2
 
 #endif
 

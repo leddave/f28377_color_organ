@@ -6,73 +6,47 @@
 #include "F28x_Project.h"     // Device Headerfile and Examples Include File
 #include "globals.h"
 #include "utils.h"
+#include "my_adc.h"
 
-#if 0
-//#ifdef FLASH
-#include "f2802x_common/include/clk.h"
-#include "f2802x_common/include/adc.h"
-#include "f2802x_common/include/pwm.h"
-#endif
 
 //Global variables
 uint32_t  randnum;
 
 extern volatile struct CPUTIMER_REGS CpuTimer1Regs;
+#if 0 //def FLASH
+extern uint16_t RFFTinBuff1[FFT_SIZE];
+extern uint16_t RFFTinBuff2[FFT_SIZE];
+extern uint16_t fft_ready;
+
+void start_adc_timer(void);
+void stop_adc_timer(void);
+#endif
 
 
 //Create a seed to initialize the random number sequence. If running from ram,
 //(debugging) don't waste code space, just use a static seed.
 void init_rnd(uint32_t seed)
 {
-#if 0
-//#ifdef FLASH
-  uint32_t seed, temp;
-  CLK_Handle myClk;
-  ADC_Handle myAdc;
-  PWM_Handle myPwm;
+#if 0 //def FLASH
+  uint16_t idx;
+  uint32_t sum = 0;
 
-  myClk = CLK_init((void *)CLK_BASE_ADDR, sizeof(CLK_Obj));
-  myAdc = ADC_init((void *)ADC_BASE_ADDR, sizeof(ADC_Obj));
-  myPwm = PWM_init((void *)PWM_ePWM1_BASE_ADDR, sizeof(PWM_Obj));
+  start_adc_timer();
 
-  // Initialize the ADC
-  ADC_enableBandGap(myAdc);
-  ADC_enableRefBuffers(myAdc);
-  ADC_powerUp(myAdc);
-  ADC_enable(myAdc);
-  ADC_setVoltRefSrc(myAdc, ADC_VoltageRefSrc_Int);
+  while (1)
+  {
+    if (fft_ready == 1)
+    {
+      fft_ready = 0;
+      stop_adc_timer();
+      break;
+    }
+  }
 
-  //Note: Channel ADCINA4 will be double sampled to workaround the ADC 1st sample issue for rev0 silicon errata
-  ADC_setIntPulseGenMode(myAdc, ADC_IntPulseGenMode_Prior);               //ADCINT1 trips after AdcResults latch
-  ADC_setSocChanNumber (myAdc, ADC_SocNumber_1, ADC_SocChanNumber_A4);    //set SOC1 channel select to ADCINA4
-  ADC_setSocTrigSrc(myAdc, ADC_SocNumber_1, ADC_SocTrigSrc_EPWM1_ADCSOCA);    //set SOC1 start trigger on EPWM1A, due to round-robin SOC0 converts first then SOC1
-  ADC_setSocSampleWindow(myAdc, ADC_SocNumber_1, ADC_SocSampleWindow_7_cycles);   //set SOC1 S/H Window to 7 ADC Clock Cycles, (6 ACQPS plus 1)
+  for (idx = 0; idx < FFT_SIZE; idx ++)
+    sum += (RFFTinBuff1[idx] + RFFTinBuff2[idx]);
 
-  // Enable PWM clock
-  CLK_enablePwmClock(myClk, PWM_Number_1);
-
-  // Setup PWM
-  PWM_enableSocAPulse(myPwm);                                         // Enable SOC on A group
-  PWM_setSocAPulseSrc(myPwm, PWM_SocPulseSrc_CounterEqualCmpAIncr);   // Select SOC from from CPMA on upcount
-  PWM_setSocAPeriod(myPwm, PWM_SocPeriod_FirstEvent);                 // Generate pulse on 1st event
-  PWM_setCmpA(myPwm, 0x0080);                                         // Set compare A value
-  PWM_setPeriod(myPwm, 0xFFF);                                        // Set period for ePWM1
-  PWM_setCounterMode(myPwm, PWM_CounterMode_Up);                      // count up and start
-  CLK_enableTbClockSync(myClk);
-
-  delay(4000);
-  temp = ADC_readResult(myAdc, ADC_ResultNumber_1); //discard this one
-  delay(4000);
-  temp = ADC_readResult(myAdc, ADC_ResultNumber_1);
-  delay(4000);
-  seed = ADC_readResult(myAdc, ADC_ResultNumber_1);
-
-  randnum = seed + ((temp & 0xff) << 8) + (temp >> 8);
-
-  ADC_disable(myAdc);
-  ADC_powerDown(myAdc);
-  CLK_disablePwmClock(myClk, PWM_Number_1);
-  CLK_disableTbClockSync(myClk);
+  randnum = sum;
 #else
 
   randnum = seed;

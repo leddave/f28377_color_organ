@@ -3,17 +3,22 @@
 
 //These #defines point into fontchar[]
 #define FONT_SPECIAL_IDX               10
-#define FONT_UPPER_IDX                 22
-#define FONT_LOWER_IDX                 48
+#define FONT_UPPER_IDX                 23
+#define FONT_LOWER_IDX                 49
 
 
 //Not all characters are included.  The display routines will skip any
 //character not found in this list.  The list is in groups of ASCII code.
 //New characters must be inserted to preserve this ordering, and the offset
-//#defines above adjusted so they still point to the correct entries.
+//#defines above adjusted so they still point to the correct entries.  Make
+//sure you insert the new characters in both 8x6 and 6x4 fonts identically.
 
 const font_t fontchar[NUM_FONT_CHAR] =
 {
+  #ifdef LARGE_ARRAY
+  //Define the 8x6 font.
+  //Each byte is a column of pixels, top-down. A '1' bit means to
+  //turn that LED on at that position.
   { 48, 5, 0x7c82, 0x9282, 0x7c00}, //'0'  Numbers
   { 49, 5, 0x0242, 0xfe02, 0x0200}, //'1'
   { 50, 5, 0x468a, 0x9292, 0x6200}, //'2'
@@ -28,8 +33,9 @@ const font_t fontchar[NUM_FONT_CHAR] =
   { 32, 1, 0x0000, 0x0000, 0x0000}, //' '  Special chars
   { 33, 1, 0xfa00, 0x0000, 0x0000}, //'!'
   { 35, 5, 0x28fe, 0x28fe, 0x2800}, //'#'
+  { 39, 2, 0xa0c0, 0x0000, 0x0000}, //'''
   { 40, 2, 0x7c82, 0x0000, 0x0000}, //'('
-  { 41, 2, 0x82c7, 0x0000, 0x0000}, //')'
+  { 41, 2, 0x827c, 0x0000, 0x0000}, //')'
   { 44, 2, 0x0506, 0x0000, 0x0000}, //','
   { 46, 2, 0x0606, 0x0000, 0x0000}, //'.'
   { 47, 3, 0x0638, 0xc000, 0x0000}, //'/'
@@ -38,13 +44,13 @@ const font_t fontchar[NUM_FONT_CHAR] =
   { 61, 4, 0x2828, 0x2828, 0x0000}, //'='
   { 63, 5, 0x4080, 0x8a90, 0x6000}, //'?'
 
-  { 65, 6, 0x7fff, 0x9090, 0x907e}, //'A'  Uppercase
+  { 65, 6, 0x7efe, 0x9090, 0x907e}, //'A'  Uppercase
   { 66, 6, 0xfefe, 0x9292, 0x926c}, //'B'
   { 67, 6, 0x7cfe, 0x8282, 0x8244}, //'C'
   { 68, 6, 0xfefe, 0x8282, 0x827c}, //'D'
   { 69, 5, 0xfefe, 0x9292, 0x9200}, //'E'
   { 70, 5, 0xfefe, 0x9090, 0x9000}, //'F'
-  { 71, 6, 0x7cfe, 0x8292, 0x924e}, //'G'
+  { 71, 6, 0x7efe, 0x8292, 0x924e}, //'G'
   { 72, 6, 0xfefe, 0x1010, 0x10fe}, //'H'
   { 73, 5, 0x8282, 0xfe82, 0x8200}, //'I'
   { 74, 6, 0x1c1e, 0x0202, 0x02fc}, //'J'
@@ -63,7 +69,7 @@ const font_t fontchar[NUM_FONT_CHAR] =
   { 87, 6, 0xfefe, 0x0418, 0x04fe}, //'W'
   { 88, 6, 0xc6ee, 0x2810, 0x28c6}, //'X'
   { 89, 6, 0xc0e0, 0x3e1e, 0x20c0}, //'Y'
-  { 90, 5, 0x868a, 0x92a2, 0xc200}, //'Z'
+  { 90, 6, 0xc686, 0x8a92, 0xa2c2}, //'Z'
 
   { 97, 6, 0x0c2a, 0x2a2a, 0x1c02}, //'a'  Lowercase
   { 98, 5, 0xfe22, 0x2222, 0x1c00}, //'b'
@@ -91,6 +97,90 @@ const font_t fontchar[NUM_FONT_CHAR] =
   {120, 5, 0x2214, 0x0814, 0x2200}, //'x'
   {121, 5, 0x3805, 0x0505, 0x3e00}, //'y'
   {122, 5, 0x2226, 0x2a32, 0x2200}  //'z'
+  #else
+  //Define the 6x4 font
+  //Each byte is a column of pixels, top-down. A '1' bit means to
+  //turn that LED on at that position. For this font, only the first
+  //six bits in each byte are used.
+  { 48, 4, 0x7088, 0x8870}, //'0'  Numbers
+  { 49, 3, 0x48f8, 0x0800}, //'1'
+  { 50, 4, 0x4898, 0xa848}, //'2'
+  { 51, 4, 0x5088, 0xa850}, //'3'
+  { 52, 4, 0xe020, 0xf820}, //'4'
+  { 53, 4, 0xc8a8, 0xa890}, //'5'
+  { 54, 4, 0x70a8, 0xa810}, //'6'
+  { 55, 3, 0x88b0, 0xc000}, //'7'
+  { 56, 4, 0x50a8, 0xa850}, //'8'
+  { 57, 4, 0x40a8, 0xa870}, //'9'
+
+  { 32, 1, 0x0000, 0x0000}, //' '  Special chars
+  { 33, 1, 0xe800, 0x0000}, //'!'
+  { 35, 2, 0x0000, 0x0000}, //'#'
+  { 39, 1, 0xc000, 0x0000}, //'''
+  { 40, 2, 0x7088, 0x0000}, //'('
+  { 41, 2, 0x8870, 0x0000}, //')'
+  { 44, 1, 0x0c00, 0x0000}, //','
+  { 46, 1, 0x0800, 0x0000}, //'.'
+  { 47, 3, 0x0870, 0x8000}, //'/'
+  { 58, 1, 0x2800, 0x0000}, //':'
+  { 59, 1, 0x2c00, 0x0000}, //';'
+  { 61, 3, 0x5050, 0x5000}, //'='
+  { 63, 4, 0x4088, 0xa040}, //'?'
+
+  { 65, 4, 0x78a0, 0xa078}, //'A'  Uppercase
+  { 66, 4, 0xf8a8, 0xa850}, //'B'
+  { 67, 4, 0x7088, 0x8850}, //'C'
+  { 68, 4, 0xf888, 0x8870}, //'D'
+  { 69, 3, 0xf8a8, 0xa800}, //'E'
+  { 70, 4, 0xf8a0, 0xa000}, //'F'
+  { 71, 4, 0x7888, 0xa830}, //'G'
+  { 72, 4, 0xf820, 0x20f8}, //'H'
+  { 73, 3, 0x88f8, 0x8800}, //'I'
+  { 74, 4, 0x1008, 0x08f0}, //'J'
+  { 75, 4, 0xf820, 0x5088}, //'K'
+  { 76, 3, 0xf808, 0x0800}, //'L'
+  { 77, 4, 0xf860, 0x40f8}, //'M'
+  { 78, 4, 0xf840, 0x20f8}, //'N'
+  { 79, 4, 0xf888, 0x88f8}, //'O'
+  { 80, 4, 0xf8a0, 0xa040}, //'P'
+  { 81, 4, 0x7088, 0x9068}, //'Q'
+  { 82, 4, 0xf8a0, 0xb048}, //'R'
+  { 83, 4, 0x48a8, 0xa810}, //'S'
+  { 84, 3, 0x80f8, 0x8000}, //'T'
+  { 85, 4, 0xf008, 0x08f0}, //'U'
+  { 86, 3, 0xf008, 0xf000}, //'V'
+  { 87, 4, 0xf830, 0x10f8}, //'W'
+  { 88, 4, 0x8870, 0x5088}, //'X'
+  { 89, 4, 0xc020, 0x38c0}, //'Y'
+  { 90, 4, 0x98a8, 0xc888}, //'Z'
+
+  { 97, 3, 0x1028, 0x3800}, //'a'  Lowercase
+  { 98, 3, 0xf828, 0x1000}, //'b'
+  { 99, 3, 0x1028, 0x2800}, //'c'
+  {100, 3, 0x1028, 0xf800}, //'d'
+  {101, 4, 0x3854, 0x5420}, //'e'
+  {102, 3, 0x20f8, 0xa000}, //'f'
+  {103, 4, 0x2054, 0x5438}, //'g'
+  {104, 3, 0xf820, 0x1800}, //'h'
+  {105, 1, 0xb800, 0x0000}, //'i'
+  {106, 3, 0x0804, 0xb800}, //'j'
+  {107, 3, 0xf810, 0x2800}, //'k'
+  {108, 1, 0xf800, 0x0000}, //'l'
+  {109, 4, 0x3830, 0x2018}, //'m'
+  {110, 3, 0x3820, 0x1800}, //'n'
+  {111, 3, 0x1028, 0x1000}, //'o'
+  {112, 3, 0x3c28, 0x1000}, //'p'
+  {113, 3, 0x1028, 0x3c00}, //'q'
+  {114, 3, 0x3820, 0x1000}, //'r'
+  {115, 4, 0x2054, 0x5408}, //'s'
+  {116, 3, 0x20f8, 0x2000}, //'t'
+  {117, 3, 0x3008, 0x3800}, //'u'
+  {118, 3, 0x3008, 0x3000}, //'v'
+  {119, 4, 0x3038, 0x0830}, //'w'
+  {120, 3, 0x2810, 0x2800}, //'x'
+  {121, 3, 0x340c, 0x3800}, //'y'
+  {122, 3, 0x4858, 0x6800}  //'z'
+  #endif
 };
 
 
@@ -123,6 +213,7 @@ uint16_t font_pix_len(char *str, uint16_t *str_idx)
 
     idx2 = font_get_idx(str[idx]);
     sum += fontchar[idx2].wid + 1;
+
     str_idx[idx] = idx2;
   }
 

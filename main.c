@@ -85,14 +85,16 @@ uint16_t   frame_start;
 frameState frame_state;
 uint16_t   sample_count;
 uint16_t   fft_ready;
+uint16_t   text_showing;
 
 __cregister volatile unsigned int IFR;
 __cregister volatile unsigned int IER;
 
 extern volatile uint16_t frame_sync;
 extern uint32_t frame_cnt;
-extern uint16_t end_of_gap;
-extern uint16_t peak_flag;
+volatile extern uint16_t end_of_gap;
+volatile extern uint16_t gap_long_found;
+volatile extern uint16_t peak_flag;
 
 
 //This Timer1 ISR is programmed to expire at the frame rate.
@@ -226,23 +228,24 @@ void initialize(void)
   frame_state = FRAME_WAITING_FOR_START;
   frame_start = 0;
   frame_cnt   = 0;
+  text_showing= 0;
 }
 
 
 int main(void)
 {
-  uint16_t display = 0;
+//  uint16_t display = 0;
 
   //The init function must be called prior to flash copies that will fail
   //if the watchdog timer expires prior to the memcpy completion. The init
   //function will disable the watchdog.
+
   initialize();
 
-
-//  initial_display();
+  initial_display();
 
  /* Here is the processing schedule for each frame:
-  * 
+  *
   * Frame Timer expires:
   *  1) Start ADC Sampling Timer
   *  2) Call Beat Detect to run in the background (since it runs multi-frame)
@@ -281,10 +284,19 @@ int main(void)
       color_organ_prep(RFFTmagBuff2, chan_max_right);
       beat_detect_prep();
 
+      if (gap_long_found)
+      {
+        do_gap_display();
+      }
+      else
+      {
+        //Create a display with the data. There could be logic here to use
+        //the output of beat detection to periodically change display routines.
 
-      //Create a display with the data. There could be logic here to use
-      //the output of beat detection to periodically change display routines.
+        //For now, fix the display on 2x2 until we figure out a good time to change.
+        two_by_two(peak_flag, chan_max_left, chan_max_right);
 
+#if 0
       if (end_of_gap)
       {
         display ++;
@@ -292,23 +304,27 @@ int main(void)
           display = 0;
       }
 
-//For now, fix the display on 2x2 until we figure out a good time to change.
-display = 1;
       switch (display)
       {
         case 0:
-          color_bars(LEFT,  chan_max_left);
-          color_bars(RIGHT, chan_max_right);
+          line_segments(peak_flag, chan_max_right);
           break;
 
         case 1:
-          two_by_two(LEFT,  peak_flag, chan_max_left);
-          two_by_two(RIGHT, peak_flag, chan_max_right);
+          two_by_two(peak_flag, chan_max_left, chan_max_right);
+          break;
+
+        case 2:
+          tetris(LEFT,  3, peak_flag, chan_max_left);
+          tetris(RIGHT, 3, peak_flag, chan_max_right);
           break;
       };
+#endif
 
-      frame_state = FRAME_SENDING_LED_DATA;
-      led_driver();
+        frame_state = FRAME_SENDING_LED_DATA;
+        led_driver();
+      }
+
       frame_sync = 0;
       frame_state = FRAME_WAITING_FOR_START;
     }
