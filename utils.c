@@ -67,6 +67,42 @@ uint32_t rnd(uint32_t max)
 }
 
 
+#ifdef SLAVE
+#pragma CODE_SECTION(get_mode, "ramCode")
+
+void get_mode(uint32_t *mode)
+{
+  uint32_t *gpio[1];
+  uint32_t  temp;
+
+  //Get address of GPIO A "data" registers on F28377S.
+  gpio[0] = (uint32_t *)0x07f00; //data reg
+
+  temp = *gpio[0];
+ *mode = (temp >> 16) & 0x03;
+}
+#endif
+
+
+#ifdef MASTER
+#pragma CODE_SECTION(set_mode, "ramCode")
+
+void set_mode(uint32_t mode)
+{
+  uint32_t *gpio[2];
+
+  //Get address of GPIO A "set" and "clear" registers on F28377S.
+  //GPIO A Set reg:  0x07f02
+  //GPIO A Clr reg:  0x07f04
+  gpio[1] = (uint32_t *)0x07f02; //set reg
+  gpio[0] = (uint32_t *)0x07f04; //clear reg
+
+ *gpio[0] = 0x00030000; //clear both GPIO 16 and 17
+ *gpio[1] = ((mode & 0x3) << 16);
+}
+#endif
+
+
 //This function holds the CPU for the indicated number of micro seconds (millionths
 //of a second).  Since Timer1 is running at the CPU rate, the timeout is simply a
 //multiple of this number. The timer is a countdown timer that resets to

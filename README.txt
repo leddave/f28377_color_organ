@@ -13,7 +13,7 @@
 *          TI F28377 (TI LaunchPad) 200Mhz development board
 *
 * Required Tools:
-*          CCSv6, C2000 compilers, ControlSuite
+*          CCSv6 or v7, C2000 compilers, ControlSuite
 *
 * Required Launchpad connections:
 *   Audio In: (eg. headphone jack from iPhone, iPad, etc.)
@@ -25,8 +25,14 @@
 *     J4-pin 40: Data wire of WS2811 or WS2812 lights, Left chan, string 1
 *     J4-pin 39: Data wire of WS2811 or WS2812 lights, Left chan, string 2
 *     J4-pin 38: Data wire of WS2811 or WS2812 lights, Right chan, string 1
-*     J4-pin 27: Data wire of WS2811 or WS2812 lights, Right chan, string 2
+*     J4-pin 37: Data wire of WS2811 or WS2812 lights, Right chan, string 2
 *     Any GND:   Ground wires of all LED strings
+*
+*   Multi-color organ control: (to run two color organs together)
+*     J4-pin 36: Display mode. Requires compiling with either MASTER or SLAVE
+*     J4-pin 35: Display mode. Requires compiling with either MASTER or SLAVE
+*                These GPIOs are set in output mode for MASTER, input mode
+*                for SLAVE.
 *
 *   5V Power Supply:
 *     Any GND:   Ground (or negative) of power supply

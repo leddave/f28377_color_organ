@@ -119,7 +119,7 @@ const uint16_t panel_off[NUM_PANEL][2] =
 
 //The function get_rgb() can be used to break these colors into component values.
 const uint32_t rainbow[12] = {0xf00000,  //red
-                              0xd02200,  //orange
+                              0xc82800,  //orange
                               0xf0f000,  //yellow
                               0x60e000,  //lime
                               0x00f000,  //green
@@ -131,9 +131,6 @@ const uint32_t rainbow[12] = {0xf00000,  //red
                               0x680088,  //purple
                               0x800072}; //fushia
 
-
-#pragma DATA_SECTION(chan_clr, "ramConsts")
-#pragma DATA_SECTION(chan_bin, "ramConsts")
 
 /*  Nine channel, one octave per channel color organ
     Frequency ranges: (44Khz sample rate, 86Hz per bin)
@@ -175,11 +172,13 @@ const uint16_t chan_clr[COLOR_CHANNELS] = {0, 11, 10, 8, 7, 6, 4, 3, 2};
     Channel 9:   6020..9029Hz   pitch: g8..c#9  7  bin: 70..104   color: Lime
     Channel 10:  9030..16000Hz  pitch: d9..c10 11  bin: 105..185  color: Yellow
 */
+
+#pragma DATA_SECTION(chan_bin, "ramConsts")
 const uint16_t chan_bin[COLOR_CHANNELS+1] = {0, 1, 2, 5, 13, 19, 27, 35, 70, 105, 185};
 
 //This array maps into the rainbow[] array to assign colors to each color organ channel.
+#pragma DATA_SECTION(chan_clr, "ramConsts")
 const uint16_t chan_clr[COLOR_CHANNELS] = {0, 1, 11, 8, 7, 6, 5, 4, 3, 2};
-
 
 void display_init(void)
 {
@@ -252,6 +251,7 @@ void clear_display(void)
 void do_gap_display(void)
 {
 
+  #ifndef SLAVE
   if (gap_frames % (FRAMES_PER_SEC * 12) == 0)
   {
     work_buff[0] = rnd(99) % 4;
@@ -274,6 +274,7 @@ void do_gap_display(void)
 
     clear_display();
   }
+  #endif
 }
 
 
@@ -574,6 +575,10 @@ void line_segments(uint16_t peak_flag, uint16_t *chan_val)
 
 #define MIN_TBT_FRAMES                (FRAMES_PER_SEC * 5)
 
+#ifdef SLAVE
+uint32_t prev_mode;
+#endif
+
 //This function creates a display where each 2x2 pixel subarray is assigned a
 //random color organ channel.  When the peak flag is set (after a minumum number
 //of frames), it will shuffle the 2x2s. For the large array, 3x3s are created.
@@ -582,17 +587,39 @@ void two_by_two(uint16_t peak_flag, uint16_t *left_val, uint16_t *right_val)
   uint32_t color;
   uint16_t idx, idx2, idx3;
   uint16_t r, g, b, cv;
-  uint16_t rw, cl, mode;
+  uint16_t rw, cl;
+  uint32_t mode;
   int16_t  blk_cnt;
   int16_t  shift;
   int16_t  prev_shift;
   uint16_t temp[TBT_ROW];
+
+  cv = 0;
+
+  #ifdef SLAVE
+  //If running as slave, grab the master's current mode every frame
+  get_mode(&mode);
+
+  if (mode != prev_mode)
+  {
+    //force a peak to align with the master
+    peak_flag = 1;
+    disp_frames = MIN_TBT_FRAMES * 2;
+    prev_mode = mode;
+  }
+  else
+    peak_flag = 0;
+
+  mode += 1;  //get the original mode value, 1 to 4
+  #endif
 
   //Choose a new pattern to display - on a peak boundary
   if (peak_flag & (disp_frames > MIN_TBT_FRAMES))
   {
     disp_frames = 0;
 
+    #ifndef SLAVE
+    //Choose a new display mode if not a slave
     idx = rnd(100);
     if (idx < 22)
       mode = 1; //fixed arrow
@@ -606,6 +633,12 @@ void two_by_two(uint16_t peak_flag, uint16_t *left_val, uint16_t *right_val)
       mode = 3; //random blocks
     else
       mode = 4; //random wave
+    #endif
+
+    #ifdef MASTER
+    //If running as master, set a new mode value for the slave
+    set_mode(mode-1); //can only send values 0..3
+    #endif
 
     if (mode > 2) //not a fixed pattern
     {
@@ -1055,7 +1088,7 @@ void color_bars(uint16_t side, uint16_t *chan_val)
 }
 
 
-#define HIGH_BIAS     0x28
+#define HIGH_BIAS     0x20
 #define HIGH_PASS     0x10
 #pragma CODE_SECTION(color_organ_prep, "ramCode")
 
@@ -1122,6 +1155,10 @@ void color_organ_prep(float *fft_bin, uint16_t *chan_val)
   //give it a boost if it's not zero.
   if (chan_val[COLOR_CHANNELS-1] > 0)
     chan_val[COLOR_CHANNELS-1] += HIGH_BIAS;
+
+  //Give half as much boost to the next-to-highest channel.
+  if (chan_val[COLOR_CHANNELS-2] > 0)
+    chan_val[COLOR_CHANNELS-2] += (HIGH_BIAS >> 1);
 
   //Scale the data to the maximum component RGB value.
   if (maxlo > (float)MAX_RGB_VAL)
@@ -1343,7 +1380,9 @@ void initial_display(void)
   show_text(0, 3, 0x0000a0, 60, str);
   clear_display();
 
+  #ifndef SLAVE
   show_text(1, 0, 0x00f000, 60, "Let's Go!");
+  #endif
 
   //Set the end of gap flag so that the first frame will be a peak.
   end_of_gap = 1;

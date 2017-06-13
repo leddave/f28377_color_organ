@@ -153,6 +153,22 @@ void chip_init(void)
     GPIO_SetupPinOptions(idx, GPIO_OUTPUT, GPIO_PUSHPULL);
   }
 
+  //GPIOs 16 and 17 are used if syncing two color organs together
+  #ifdef MASTER
+  for (idx = 16; idx < 18; idx ++)
+  {
+    GPIO_SetupPinMux(idx, GPIO_MUX_CPU1, 0);
+    GPIO_SetupPinOptions(idx, GPIO_OUTPUT, GPIO_PUSHPULL);
+  }
+  #endif
+  #ifdef SLAVE
+  for (idx = 16; idx < 18; idx ++)
+  {
+    GPIO_SetupPinMux(idx, GPIO_MUX_CPU1, 0);
+    GPIO_SetupPinOptions(idx, GPIO_INPUT, GPIO_PUSHPULL);
+  }
+  #endif
+
   // Disable CPU interrupts
   DINT;
 }
@@ -234,7 +250,6 @@ void initialize(void)
 
 int main(void)
 {
-//  uint16_t display = 0;
 
   //The init function must be called prior to flash copies that will fail
   //if the watchdog timer expires prior to the memcpy completion. The init
