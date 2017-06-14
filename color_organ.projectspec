@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<projectSpec>
+    <project
+        name="f28377_color_organ"
+        deviceFamily="C2000"
+        isTargetManual="false"
+        device="TMS320F28377S"
+        cgtVersion="15.12.1.LTS"
+        connection="common/targetdb/connections/TIXDS110_Connection.xml"
+        toolChain="TI"
+        linkerCommandFile="r4f_linker.cmd"
+        description="F28377 Color Organ"
+        launchWizard="false"
+        configurations="Debug, Release"
+
+        compilerBuildOptions="
+        -v28 -ml -g -mt --float_support=fpu32 -Ooff --opt_for_speed=3
+
+        --include_path="C:/ti/ti-cgt-c2000_15.12.1.LTS/include"
+        --include_path="C:/ti/controlSUITE/device_support/F2837xS/v210/F2837xS_common/include"
+        --include_path="C:/ti/controlSUITE/device_support/F2837xS/v210/F2837xS_common/include/FlashAPI"
+        --include_path="C:/ti/controlSUITE/device_support/F2837xS/v210/F2837xS_headers/include"
+        --include_path="C:/ti/controlSUITE/libs/dsp/FPU/v1_50_00_00/include"
+
+        --advice:performance=all
+        --define=FLASH
+        --define=SLAVE
+        --display_error_number
+        --diag_warning=225
+        --diag_wrap=off"
+
+        linkerBuildOptions="
+        -v28 -ml -mt --float_support=fpu32 -Ooff --opt_for_speed=3 -g -stack=0x200 -w
+        --advice:performance=all 
+        --define=FLASH 
+        --display_error_number 
+        --diag_warning=225 
+        --diag_wrap=off 
+        -z 
+        -m"f28377_color_organ.map" 
+        --stack_size=0x200 
+        --warn_sections 
+        -i"C:/ti/ti-cgt-c2000_15.12.1.LTS/lib" 
+        -i"C:/ti/controlSUITE/device_support/F2837xS/v210/F2837xS_common/lib" 
+        -i"C:/ti/ti-cgt-c2000_15.12.1.LTS/include" 
+        -i"C:/ti/controlSUITE/libs/dsp/FPU/v1_50_00_00/lib" 
+        --reread_libs 
+        --diag_wrap=off 
+        --display_error_number 
+        --xml_link_info="f28377_color_organ_linkInfo.xml" 
+        --entry_point=_c_int00 
+        --rom_model
+
+        -llibc.a
+        -lrts2800_fpu32.lib
+        -lc28x_fpu_dsp_library.lib
+
+        -i"${CG_TOOL_ROOT}/lib"
+        -i"${CTL_SUITE}/F2837xS_common/lib"
+        -i"${CG_TOOL_ROOT}/include"
+        -i"${CTL_SUITE_LIB}/dsp/FPU/v1_50_00_00/lib"
+
+        --reread_libs --diag_warning=225 --diag_wrap=off --display_error_number --warn_sections --xml_link_info=${ProjName}_linkInfo.xml --rom_model --unused_section_elimination=on"
+   >
+
+        <!-- Project properties -->
+        <property name="endianness" value="little"/>
+        <property name="output_format" value="coff"/>
+        <property name="buildProfile" value="debug"/>
+        <buildVariable name="CTL_SUITE" value="C:\ti\controlSUITE\device_support\F2837xS\v210\"/>
+        <buildVariable name="CTL_SUITE_LIB" value="C:\ti\controlSUITE\libs"/>
+        <buildVariable name="LAUNCHPAD" value="C:\ti\controlSUITE\development_kits\C2000_LaunchPad"/>
+
+        <!-- Project files -->
+        <file path="main.c" openOnCreation="false" excludeFromBuild="false" action="copy"/>
+        <file path="beat.c" openOnCreation="false" excludeFromBuild="false" action="copy"/>
+        <file path="beat.h" openOnCreation="false" excludeFromBuild="false" action="copy"/>
+        <file path="codestart.asm" openOnCreation="false" excludeFromBuild="false" action="copy"/>
+        <file path="display.c" openOnCreation="false" excludeFromBuild="false" action="copy"/>
+        <file path="display.h" openOnCreation="false" excludeFromBuild="false" action="copy"/>
+        <file path="font.c" openOnCreation="false" excludeFromBuild="false" action="copy"/>
+        <file path="font.h" openOnCreation="false" excludeFromBuild="false" action="copy"/>
+        <file path="globals.h" openOnCreation="false" excludeFromBuild="false" action="copy"/>
+        <file path="led_driver.c" openOnCreation="false" excludeFromBuild="false" action="copy"/>
+        <file path="led_driver.h" openOnCreation="false" excludeFromBuild="false" action="copy"/>
+        <file path="my_adc.c" openOnCreation="false" excludeFromBuild="false" action="copy"/>
+        <file path="my_adc.h" openOnCreation="false" excludeFromBuild="false" action="copy"/>
+        <file path="my_pie_vect.c" openOnCreation="false" excludeFromBuild="false" action="copy"/>
+        <file path="my_sys_ctrl.c" openOnCreation="false" excludeFromBuild="false" action="copy"/>
+        <file path="rfft.c" openOnCreation="false" excludeFromBuild="false" action="copy"/>
+        <file path="rfft.h" openOnCreation="false" excludeFromBuild="false" action="copy"/>
+        <file path="utils.c" openOnCreation="false" excludeFromBuild="false" action="copy"/>
+        <file path="utils.h" openOnCreation="false" excludeFromBuild="false" action="copy"/>
+
+        <file path="${CTL_SUITE}/F2837xS_common/source/F2837xS_Adc.c" openOnCreation="false" excludeFromBuild="false"/>
+        <file path="${CTL_SUITE}/F2837xS_common/source/F2837xS_CpuTimers.c" openOnCreation="false" excludeFromBuild="false"/>
+        <file path="${CTL_SUITE}/F2837xS_common/source/F2837xS_Gpio.c" openOnCreation="false" excludeFromBuild="false"/>
+
+        <file path="f28377_flash.cmd" openOnCreation="false" excludeFromBuild="false"/>
+        <file path="f28377.cmd" openOnCreation="false" excludeFromBuild="true"/>
+
+    </project>
+</projectSpec>
