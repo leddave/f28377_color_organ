@@ -72,14 +72,14 @@ SECTIONS
     .cinit:     >   FLASH_A       PAGE=0
     .pinit:     >   FLASH_A       PAGE=0
     .heap:      >   CANB_RAM      PAGE=0
-    .system:    >   PROG_MEM1     PAGE=0
-    .bss:       >   PROG_MEM1     PAGE=0
-    .sysmem:    >   PROG_MEM1     PAGE=0
     .reset:     >   RESET,        PAGE=0, TYPE = DSECT /* not used */
 
     /* PAGE 1 (data) */
 
     .stack:     >   STACK         PAGE=1
+    .bss:       >   DATA1         PAGE=1
+    .system:    >   DATA1         PAGE=1
+    .sysmem:    >   DATA1         PAGE=1
     .AdcaResult: >  ADCA_RESULT   PAGE=1
     .AdcbResult: >  ADCB_RESULT   PAGE=1
     .Timer0Ctrl: >  CPU_TIMER0    PAGE=1

@@ -2,7 +2,7 @@
 * Program: 20 Channel Stereo Color Organ
 *
 * Purpose: To transform normal stereo audio output into 10 channels of
-*          dancing, pulsing colored lights.
+*          dancing, pulsing colored lights (per audio channel).
 *
 * Supported LED strings:
 *          WS2811 pixel strings
@@ -26,6 +26,8 @@
 *     J4-pin 39: Data wire of WS2811 or WS2812 lights, Left chan, string 2
 *     J4-pin 38: Data wire of WS2811 or WS2812 lights, Right chan, string 1
 *     J4-pin 37: Data wire of WS2811 or WS2812 lights, Right chan, string 2
+*     J4-pin 34: Data wire of WS2812 (only) lights, Left chan flood
+*     J4-pin 33: Data wire of WS2812 (only) lights, Right chan flood
 *     Any GND:   Ground wires of all LED strings
 *
 *   Multi-color organ control: (to run two color organs together)
@@ -34,8 +36,17 @@
 *                These GPIOs are set in output mode for MASTER, input mode
 *                for SLAVE.
 *
+*   Note for multi-color organ use: High frequency artifacts can appear in the
+*   highest channels of either color organ if they are not properly connected
+*   together.  To avoid this, you need to do one or more of the following:
+*     1) Ground (-5V) all F28377 EVMs and 5V power supplies together.
+*     2) Run all F28377 EVMs from the same 5V power supply.
+*     3) Use some type of amplifier (such as a multi-channel headphone amp)
+*        to isolate the audio signal for each color organ (instead of using
+*        simple "Y" splitters).
+*
 *   5V Power Supply:
-*     Any GND:   Ground (or negative) of power supply
+*     Any GND:   Ground (or -5V) of power supply
 *                (+5V connects to the +5V of the LEDs)
 *
 *   Launchpad Power:
@@ -47,7 +58,7 @@ Important parts of the code:
 
 1) globals.h:
    This file defines all the important parameters for the program, such as
-   sampling rate, frame rate, type of LEDs, etc.
+   sampling rate, frame rate, etc.
 
 2) main.c:
    This file contains much of the initialization and control code, and the
@@ -57,7 +68,7 @@ Important parts of the code:
      c) Stop the ADC timer.
      d) Perform an FFT on each L/R channel, creating frequency bins.
      e) Scan the frequency bins, finding the max value for each channel.
-     f) Call a display routine to transform channel values into pixel values.
+     f) Call the display driver to transform channel values into pixel values.
      g) Call the LED driver to output the pixel values to the LED strings.
 
 3) my_adc.c:
@@ -76,7 +87,7 @@ Important parts of the code:
 
 6) led_driver.c:
    This file contains the code that bit bangs the display data out to the LEDs.
-   Selection of WS2811 vs WS2812 is done via #defines in globals.h.  The bit bang
+   Selection of WS2811 vs WS2812 is done via CCS project properties. The bit bang
    code is optimized to output 4 strings simultaneously. This application is
    setup to use strings 1 and 2 for the Left channel, and strings 3 and 4 for the
    Right.  You can use fewer strings and change this configuration, but it is
@@ -89,8 +100,21 @@ Important parts of the code:
    to use, then map into the physical array for output.
 
 
-
 Building Notes:
+
+The following #defines are optionally defined in the CCS project properties:
+  1) WS2811 - needed if the 4 primary LED strings are WS2811 type LEDs.
+  2) WS2812 - needed if the 4 primary LED strings are WS2812 type LEDs.
+  3) FLOODS - needed if using the two extra GPIOs listed above for color floods.
+  4) LARGE_ARRAY - needed if compiling for the larger of the two array sizes
+     defined in display.c.
+  5) FLASH - needed when compiling to store the program in F28377s flash. Note,
+     this requires changing which .cmd file is used as described below.
+
+  When connecting two color organs together for syncronized operation, each
+  will need one of the following defined: (not all displays may be supported)
+  6) MASTER - will choose the display.
+  7) SLAVE - will use the master's display choice.
 
 To build for RAM (CCS fast turnaround debugging)
 
@@ -101,7 +125,7 @@ To build for RAM (CCS fast turnaround debugging)
   3) Under Project->Properties->CCS Build->C2000 Compiler0->Advanced Options->
      Predefined Symbols, make sure that "FLASH" is not listed in the "Pre-
      define NAME" box. (If it is listed, click on the Delete icon with the
-     red x).  "ADCA" and possibly "TEST_ARRAY" should be defined.
+     red x).
   4) Click Ok on the Project Properties window.
   5) Click Project->Clean. If this doesn't start a build, then follow with
      Project->Build Project. The project name must be highlighted.
@@ -115,7 +139,7 @@ To build for Flash (running without CCS after initial load/flashing)
   3) Under Project->Properties->CCS Build->C2000 Compiler0->Advanced Options->
      Predefined Symbols, make sure that "FLASH" is listed in the "Pre-
      define NAME" box. (If not listed, click on the Add icon with the
-     green + and add FLASH). "ADCA" and possibly "TEST_ARRAY" should also be defined.
+     green + and add FLASH).
   4) Click Ok on the Project Properties window.
   5) Click Project->Clean. If this doesn't start a build, then follow with
      Project->Build Project. The project name must be highlighted.
@@ -129,9 +153,8 @@ Starting the CCS Debugger:
      select "Launch Selected Configuration". The debugger windows should
      open (the context changes from CCS Edit to CCS Debug).
   3) Click on the Connect Target icon.
-  4) Click on the Load Program icon, and browse to rgb_f28027.out. Click Ok.
+  4) Click on the Load Program icon, and browse to rgb_f28377.out. Click Ok.
      If you have built for flash, CCS will now erase the flash and write the
      program sections to flash. Otherwise, CCS will load to RAM.
   5) You are ready to debug. Set breakpoints, start running or stepping through
      code, inspect memory, etc.
-

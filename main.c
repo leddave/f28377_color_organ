@@ -18,6 +18,8 @@
 #include "F021_F2837xS_C28x.h"
 #endif
 
+#define MIN_DISPLAY_FRAMES             (FRAMES_PER_SEC * 5)
+
 //Global variables (register overlays)
 #pragma DATA_SECTION(WdRegs,".WdReg");
 volatile struct WD_REGS WdRegs;
@@ -95,7 +97,14 @@ extern uint32_t frame_cnt;
 volatile extern uint16_t end_of_gap;
 volatile extern uint16_t gap_long_found;
 volatile extern uint16_t peak_flag;
+extern uint16_t pause;
 
+#ifdef FLOODS
+extern uint16_t top_chan_l[MAX_CHAN];
+extern uint16_t top_chan_r[MAX_CHAN];
+extern uint16_t hyst_sum_l[COLOR_CHANNELS];
+extern uint16_t hyst_sum_r[COLOR_CHANNELS];
+#endif
 
 //This Timer1 ISR is programmed to expire at the frame rate.
 __interrupt void timer1_isr(void)
@@ -166,6 +175,13 @@ void chip_init(void)
   {
     GPIO_SetupPinMux(idx, GPIO_MUX_CPU1, 0);
     GPIO_SetupPinOptions(idx, GPIO_INPUT, GPIO_PUSHPULL);
+  }
+  #endif
+  #ifdef FLOODS
+  for (idx = 20; idx < 22; idx ++) //J4 pin 34 and 33
+  {
+    GPIO_SetupPinMux(idx, GPIO_MUX_CPU1, 0);
+    GPIO_SetupPinOptions(idx, GPIO_OUTPUT, GPIO_PUSHPULL);
   }
   #endif
 
@@ -250,7 +266,6 @@ void initialize(void)
 
 int main(void)
 {
-
   //The init function must be called prior to flash copies that will fail
   //if the watchdog timer expires prior to the memcpy completion. The init
   //function will disable the watchdog.
@@ -293,10 +308,15 @@ int main(void)
 
       frame_state = FRAME_RUNNING_FFT;
       fft_calc();
-
       frame_state = FRAME_PREP_DISPLAY_DATA;
+
+      #ifndef FLOODS
       color_organ_prep(RFFTmagBuff1, chan_max_left);
       color_organ_prep(RFFTmagBuff2, chan_max_right);
+      #else
+      color_organ_prep(0, RFFTmagBuff1, chan_max_left,  top_chan_l, hyst_sum_l);
+      color_organ_prep(1, RFFTmagBuff2, chan_max_right, top_chan_r, hyst_sum_r);
+      #endif
       beat_detect_prep();
 
       if (gap_long_found)
@@ -305,36 +325,9 @@ int main(void)
       }
       else
       {
-        //Create a display with the data. There could be logic here to use
-        //the output of beat detection to periodically change display routines.
+        pause = 0;
 
-        //For now, fix the display on 2x2 until we figure out a good time to change.
-        two_by_two(peak_flag, chan_max_left, chan_max_right);
-
-#if 0
-      if (end_of_gap)
-      {
-        display ++;
-        if (display == 2)
-          display = 0;
-      }
-
-      switch (display)
-      {
-        case 0:
-          line_segments(peak_flag, chan_max_right);
-          break;
-
-        case 1:
-          two_by_two(peak_flag, chan_max_left, chan_max_right);
-          break;
-
-        case 2:
-          tetris(LEFT,  3, peak_flag, chan_max_left);
-          tetris(RIGHT, 3, peak_flag, chan_max_right);
-          break;
-      };
-#endif
+        do_display(peak_flag, chan_max_left, chan_max_right);
 
         frame_state = FRAME_SENDING_LED_DATA;
         led_driver();

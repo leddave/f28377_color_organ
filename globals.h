@@ -4,12 +4,6 @@
 #include "F28x_Project.h"     // Device Headerfile and Examples Include File
 
 
-
-//One of the following WS28xx #defines must be enabled! (but not both)
-#define WS2811
-//#define WS2812
-
-
 /* The CPU Speed in MHz per second. Since 1 Mhz clocks means each clock is
  * equal to 1us (1 microsecond), a speed of 200 MHz means there are 200 clocks
  * in 1us. The timer routines require a period in microseconds. */
@@ -24,15 +18,22 @@
 /* Define the maximum allowed (total) RGB LEDs. It should be a multiple of the
  * number of LED strings. */
 #ifdef LARGE_ARRAY
-#define MAX_LEDS                       (288 * 4)
+#define LED_STRING_LEN                288
 #else
-#define MAX_LEDS                       (120 * 4)
+#define LED_STRING_LEN                120
 #endif
 
 /* In this application, strings 1,2 are left channel, 3,4 are right channel.
  * Do not exceed 4 strings, as the LED driver only drives 4 strings. */
 #define NUM_STRINGS                    4
-#define LED_STRING_LEN                (MAX_LEDS / NUM_STRINGS)
+#define MAX_LEDS                      (LED_STRING_LEN * NUM_STRINGS)
+
+#ifdef  FLOODS
+#define NUM_FLOODS                     2
+#define FLOOD_STRING_LEN               256
+#define FLOOD_LEDS                    (FLOOD_STRING_LEN * NUM_FLOODS)
+#endif
+
 #define LEFT                           0
 #define RIGHT                          1
 #define COLOR_CHANNELS                 10

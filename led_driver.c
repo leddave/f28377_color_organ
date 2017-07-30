@@ -33,6 +33,10 @@ uint32_t  times[20];
 volatile uint16_t frame_sync;
 extern   Led      led[MAX_LEDS]; //array of colors built elsewhere
 
+#ifdef   FLOODS
+extern   Led      fled[FLOOD_LEDS]; //array of colors built elsewhere
+#endif
+
 extern volatile struct CPUTIMER_REGS  CpuTimer1Regs;
 extern volatile struct GPIO_DATA_REGS GpioDataRegs;
 
@@ -508,6 +512,145 @@ void send_led_data_24(void)
 #endif
 
 
+#ifdef FLOODS
+#pragma CODE_SECTION(send_flood_data, "ramCode")
+
+//This function will drive one left channel flood and one right channel flood.
+//They are on GPIOs 20 and 21 respectively.
+void send_flood_data(void)
+{
+  uint16_t  idx;
+  uint16_t  idx2;
+  uint16_t  bits;
+  uint16_t  eow;
+  uint32_t  mask_0;
+  uint32_t  mask_1;
+  uint32_t  clr1;
+  uint32_t  clr2;
+  uint32_t *str1;
+  uint32_t *str2;
+  uint32_t *gpio[2];
+
+  DINT;
+
+  //Get address of GPIO A "set" and "clear" registers on F28377S.
+  //GPIO A Set reg:  0x07f02
+  //GPIO A Clr reg:  0x07f04
+  gpio[1] = (uint32_t *)0x07f02; //set reg
+  gpio[0] = (uint32_t *)0x07f04; //clear reg
+
+#ifdef TIMING
+  time_start = CpuTimer1Regs.TIM.all;
+#endif
+
+  bits = FLOOD_STRING_LEN * 8 * 3;
+  str1 = (uint32_t *)&fled[0];
+  str2 = (uint32_t *)&fled[FLOOD_STRING_LEN];
+  eow  = 0;
+
+  //Prepare the loop. The flip32 intrinsic bit reverses a 32bit word. In our
+  //24bit RGB case, this puts 8 empty bits at the bottom of the 32 bits.
+  clr1 = __flip32(*str1++) >> 4;
+  clr2 = __flip32(*str2++) >> 3;
+
+  //Create a 1's mask and a 0's mask for the 2 LED strings (for GPIOs 20 and 21).
+  mask_1 = ((clr1 & 0x10) | (clr2 & 0x20)) << 16;
+  mask_0 = ~mask_1 & 0x00300000;
+
+  //Clock the data out to the lights. This code will drive 2 GPIOs simultaneously.
+  for (idx = 0; idx < bits; idx ++)
+  {
+
+    //***TIME 0: Set GPIOs 20 and 21 high at clock 0.
+   *gpio[1] = 0x00300000;
+
+    for (idx2 = 0; idx2 < DELAY1; idx2 ++)
+      asm("  nop ");
+
+    asm("  nop ");
+    asm("  nop ");
+    asm("  nop ");
+#ifdef WS2812
+    asm("  nop ");
+    asm("  nop ");
+    asm("  nop ");
+    asm("  nop ");
+    asm("  nop ");
+    asm("  nop ");
+    asm("  nop ");
+    asm("  nop ");
+#endif
+
+    //***TIME 1: Set GPIOs for zero bits low.
+    //(ws2811 = clock 100, ws2812 = clock 80)
+   *gpio[0] = mask_0;
+
+    for (idx2 = 0; idx2 < DELAY2; idx2 ++)
+      asm("  nop ");
+
+    asm("  nop ");
+    asm("  nop ");
+#ifdef WS2812
+    asm("  nop ");
+    asm("  nop ");
+    asm("  nop ");
+    asm("  nop ");
+    asm("  nop ");
+    asm("  nop ");
+    asm("  nop ");
+    asm("  nop ");
+    asm("  nop ");
+    asm("  nop ");
+#endif
+
+    //***TIME 2: Set GPIOs for one bits low.
+    //(ws2811 = clock 240, ws2812 = clock 160)
+   *gpio[0] = mask_1;
+
+
+    //***TIME 3: Wait for end of bit time (prepare for the next bit).
+    //(ws2811 requires 500 clocks (at 200Mhz) per bit).
+    //(ws2812 requires 250 clocks (at 200Mhz) per bit).
+
+    eow ++;
+    if (eow == 24) //time to load the next led[]
+    {
+      eow  = 0;
+      clr1 = __flip32(*str1++) >> 4;
+      clr2 = __flip32(*str2++) >> 3;
+
+      for (idx2 = 0; idx2 < DELAY3a; idx2 ++)
+        asm("  nop ");
+
+      asm("  nop ");
+      asm("  nop ");
+    }
+    else
+    {
+      clr1 >>= 1;
+      clr2 >>= 1;
+
+      for (idx2 = 0; idx2 < DELAY3b; idx2 ++)
+        asm("  nop ");
+
+      asm("  nop ");
+      asm("  nop ");
+      asm("  nop ");
+      asm("  nop ");
+      asm("  nop ");
+      asm("  nop ");
+    }
+
+    //Create a 1's mask and a 0's mask for the 2 LED strings (for GPIOs 20, 21).
+    mask_1 = ((clr1 & 0x10) | (clr2 & 0x20)) << 16;
+    mask_0 = ~mask_1 & 0x00300000;
+  }
+
+  EINT;
+}
+#endif
+
+
 // This main driver function should be called at each timer interrupt. WS8211
 // and WS2812 LEDs require 24bits/LED when the colors need to change. Since
 // PWM is not required, this function should called at the frame rate.
@@ -521,6 +664,12 @@ void led_driver(void)
   #else
     send_led_data_13();
     send_led_data_24();
+  #endif
+
+  #ifdef FLOODS
+    //Future optimization: drive left flood with GPIOs 1,3 and right flood with 2,4.
+
+    send_flood_data();
   #endif
   }
 

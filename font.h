@@ -36,6 +36,7 @@ typedef struct
 extern const font_t fontchar[NUM_FONT_CHAR];
 
 
+uint16_t font_char_len(uint16_t idx);
 uint16_t font_str_len(char *str);
 uint16_t font_pix_len(char *str, uint16_t *str_idx);
 uint16_t font_get_idx(uint16_t code);

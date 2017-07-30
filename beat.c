@@ -104,12 +104,12 @@ void update_average_power(void)
       power_avg += power_avg_buff[idx];
     }
 
-    //Find the average and 25% threshold
+    //Find the average and 37% threshold
     power_avg /= ramp_frames;
-    peak_threshold = power_avg + (power_avg >> 2);
+    peak_threshold = power_avg + (power_avg >> 2) + (power_avg >> 3);
 
     //See if this frame is a peak
-    if (sum > peak_threshold)
+    if (sum >= peak_threshold)
     {
       //The call to rnd() is a dummy call to better randomize the seed.
       peak_flag = 1 + rnd(1);
