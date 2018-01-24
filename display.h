@@ -14,7 +14,7 @@ void arrows(uint16_t peak_flag, uint16_t *left_val, uint16_t *right_val);
 void waves(uint16_t peak_flag, uint16_t *left_val, uint16_t *right_val);
 void fade(uint16_t peak_flag, uint16_t *left_val, uint16_t *right_val);
 
-void two_by_two(uint16_t peak_flag, uint16_t *left_val, uint16_t *right_val);
+void two_by_two(uint16_t peak_flag, uint16_t *left_val, uint16_t *right_val, uint32_t mode);
 void color_bars(uint16_t side, uint16_t *chan_val);
 void tetris(uint16_t side, uint16_t blocks, uint16_t peak_flag, uint16_t *chan_val);
 

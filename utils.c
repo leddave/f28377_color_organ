@@ -75,11 +75,11 @@ void get_mode(uint32_t *mode)
   uint32_t *gpio[1];
   uint32_t  temp;
 
-  //Get address of GPIO A "data" registers on F28377S.
-  gpio[0] = (uint32_t *)0x07f00; //data reg
+  //Get address of GPIO B "data" registers on F28377S.
+  gpio[0] = (uint32_t *)0x07f08; //data reg
 
   temp = *gpio[0];
- *mode = (temp >> 16) & 0x03;
+ *mode = (temp >> 26) & 0x07;
 }
 #endif
 
@@ -91,14 +91,12 @@ void set_mode(uint32_t mode)
 {
   uint32_t *gpio[2];
 
-  //Get address of GPIO A "set" and "clear" registers on F28377S.
-  //GPIO A Set reg:  0x07f02
-  //GPIO A Clr reg:  0x07f04
-  gpio[1] = (uint32_t *)0x07f02; //set reg
-  gpio[0] = (uint32_t *)0x07f04; //clear reg
+  //Get address of GPIO B "set" and "clear" registers on F28377S.
+  gpio[1] = (uint32_t *)0x07f0a; //set reg
+  gpio[0] = (uint32_t *)0x07f0c; //clear reg
 
- *gpio[0] = 0x00030000; //clear both GPIO 16 and 17
- *gpio[1] = ((mode & 0x3) << 16);
+ *gpio[0] = 0x1c00 0000; //clear GPIOs 58, 59, 60
+ *gpio[1] = ((mode & 0x7) << 26);
 }
 #endif
 

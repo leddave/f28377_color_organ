@@ -14,10 +14,10 @@
 
 #else //WS2812
 
-#define DELAY1     4
-#define DELAY2     4
-#define DELAY3a    1
-#define DELAY3b    2
+#define DELAY1     11  /* 4 */
+#define DELAY2     15 /* 4 */
+#define DELAY3a    1  /* 1 */
+#define DELAY3b    2 /* 2 */
 
 #endif
 

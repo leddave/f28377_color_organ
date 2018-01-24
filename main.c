@@ -106,9 +106,14 @@ extern uint16_t hyst_sum_l[COLOR_CHANNELS];
 extern uint16_t hyst_sum_r[COLOR_CHANNELS];
 #endif
 
+//uint32_t isr_err = 0;
+
 //This Timer1 ISR is programmed to expire at the frame rate.
 __interrupt void timer1_isr(void)
 {
+//if (frame_sync == 1) //count processing overruns
+//isr_err ++;
+
   frame_start = 1; //used by the main loop to start frame processing
   frame_sync = 1;  //used by other display routines to throttle updates
   frame_cnt ++;
@@ -162,22 +167,24 @@ void chip_init(void)
     GPIO_SetupPinOptions(idx, GPIO_OUTPUT, GPIO_PUSHPULL);
   }
 
-  //GPIOs 16 and 17 are used if syncing two color organs together
+  //GPIOs 58, 59, and 60 are used if syncing two color organs together
   #ifdef MASTER
-  for (idx = 16; idx < 18; idx ++)
+  for (idx = 58; idx < 61; idx ++)
   {
     GPIO_SetupPinMux(idx, GPIO_MUX_CPU1, 0);
     GPIO_SetupPinOptions(idx, GPIO_OUTPUT, GPIO_PUSHPULL);
   }
   #endif
   #ifdef SLAVE
-  for (idx = 16; idx < 18; idx ++)
+  for (idx = 58; idx < 61; idx ++)
   {
     GPIO_SetupPinMux(idx, GPIO_MUX_CPU1, 0);
     GPIO_SetupPinOptions(idx, GPIO_INPUT, GPIO_PUSHPULL);
   }
   #endif
+
   #ifdef FLOODS
+  //Setup GPIOs 20 and 21 for left/right channel flood LEDs
   for (idx = 20; idx < 22; idx ++) //J4 pin 34 and 33
   {
     GPIO_SetupPinMux(idx, GPIO_MUX_CPU1, 0);

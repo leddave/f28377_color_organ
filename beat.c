@@ -106,7 +106,7 @@ void update_average_power(void)
 
     //Find the average and 37% threshold
     power_avg /= ramp_frames;
-    peak_threshold = power_avg + (power_avg >> 2) + (power_avg >> 3);
+    peak_threshold = power_avg + (power_avg >> 1); //50% peak
 
     //See if this frame is a peak
     if (sum >= peak_threshold)

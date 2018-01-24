@@ -28,11 +28,13 @@
 *     J4-pin 37: Data wire of WS2811 or WS2812 lights, Right chan, string 2
 *     J4-pin 34: Data wire of WS2812 (only) lights, Left chan flood
 *     J4-pin 33: Data wire of WS2812 (only) lights, Right chan flood
+*                (note: floods cannot be used with WS2811 panels)
 *     Any GND:   Ground wires of all LED strings
 *
 *   Multi-color organ control: (to run two color organs together)
-*     J4-pin 36: Display mode. Requires compiling with either MASTER or SLAVE
-*     J4-pin 35: Display mode. Requires compiling with either MASTER or SLAVE
+*     J1-pin  7: Display mode bit 2. Requires compiling with either MASTER or SLAVE
+*     J2-pin 15: Display mode bit 0. Requires compiling with either MASTER or SLAVE
+*     J2-pin 14: Display mode bit 1. Requires compiling with either MASTER or SLAVE
 *                These GPIOs are set in output mode for MASTER, input mode
 *                for SLAVE.
 *

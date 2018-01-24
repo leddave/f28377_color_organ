@@ -31,7 +31,8 @@
 #ifdef  FLOODS
 #define NUM_FLOODS                     2
 #define FLOOD_STRING_LEN               256
-#define FLOOD_LEDS                    (FLOOD_STRING_LEN * NUM_FLOODS)
+#define FLOOD_STRING_MEM_LEN           LED_STRING_LEN /* make it the same as panels */
+#define FLOOD_LEDS                    (FLOOD_STRING_MEM_LEN * NUM_FLOODS)
 #endif
 
 #define LEFT                           0
