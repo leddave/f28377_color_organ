@@ -23,6 +23,8 @@ extern uint16_t RFFTinBuff1[RFFT_SIZE];
 extern uint16_t RFFTinBuff2[RFFT_SIZE];
 
 
+#pragma CODE_SECTION(adc_sample, "ramCode")
+
 //The input voltage range is 0 to 3.3V and the output digital code is in
 //the range of 0 (0V) to 4095 (3.3V).
 void adc_sample(uint16_t sample_num)
@@ -44,6 +46,24 @@ void adc_sample(uint16_t sample_num)
   //store the value from Launchpad pin J3-29 (right channel)
 //  RFFTin1Buff[sample_num+RFFT_SIZE] = AdcaResult[1] << 4;
   RFFTinBuff2[sample_num] = AdcaResult[1] << 3;
+}
+
+
+#pragma CODE_SECTION(start_adc_timer, "ramCode")
+
+void start_adc_timer(void)
+{
+  CpuTimer2Regs.TCR.bit.TRB = 1;     // 1 = reload timer
+  CpuTimer2Regs.TCR.bit.TSS = 0;     // 0 = Start/Restart
+}
+
+
+#pragma CODE_SECTION(stop_adc_timer, "ramCode")
+
+void stop_adc_timer(void)
+{
+  CpuTimer2Regs.TCR.bit.TSS = 1;     // 1 = Stop timer
+  CpuTimer2Regs.TCR.bit.TRB = 1;     // 1 = reload timer
 }
 
 

@@ -64,6 +64,9 @@ RFFT_F32_STRUCT_Handle hnd_rfft = &rfft;
 extern uint16_t sample_count;
 extern uint16_t fft_ready;
 
+
+#pragma CODE_SECTION(edge_taper, "ramCode")
+
 // This function does a 16 sample edge tapering of the FFT inputs for both
 // left and right channels.
 void edge_taper(void)
@@ -76,7 +79,7 @@ void edge_taper(void)
   idx2 = RFFT_SIZE-1;
   idx3 = RFFT_SIZE;
   idx4 =(RFFT_SIZE*2)-1;
-  
+
   for (idx1 = 0; idx1 < 15; idx1 ++)
   {
     RFFTinBuff1[idx1] >>= shift; //left channel
@@ -115,6 +118,8 @@ void fft_init()
 //  memset(RFFTmagBuff, 0, sizeof(RFFTmagBuff));
 }
 
+
+#pragma CODE_SECTION(fft_calc, "ramCode")
 
 void fft_calc(void)
 {

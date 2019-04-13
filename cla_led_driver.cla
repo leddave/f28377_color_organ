@@ -1,0 +1,605 @@
+//#############################################################################
+//  \file cla_led_driver.cla
+//
+//  \brief  WS28xx LED driver routines for CLA co-processor
+//  \author Dave Woodall
+//  \date   June 2018
+//
+//
+//  Group:            C2000
+//  Target Family:    F2837xS
+//
+// VERY IMPORTANT: This file MUST be compiled with -O2 and -opt_for_speed=2.
+// If you change the project's settings, you need to verify that this file's
+// Build Settings have not changed. If they do, the LEDs will flash wildly.
+// To check, right click on the file in the Project Explorer, then click on
+// Show Build Settings->Optimization - for THIS file.
+//#############################################################################
+//
+// Included Files
+//
+#include "F28x_Project.h"     // Device Headerfile and Examples Include File
+#include "globals.h"
+#include "F2837xS_cla.h"
+#include "cla.h"
+
+
+extern   LED_MAIN   led_ping[MAX_LEDS];
+extern   LED_MAIN   led_pong[MAX_LEDS];
+extern   uint16_t   ppong_use;
+
+#ifdef   FLOODS
+extern   LED_FLOOD  fled_ping[FLOOD_LEDS];
+extern   LED_FLOOD  fled_pong[FLOOD_LEDS];
+#endif
+
+extern volatile struct GPIO_DATA_REGS GpioDataRegs;
+extern volatile struct EPWM_REGS Epwm1Regs;
+
+typedef union pakmask
+{
+  uint32_t all;
+  uint16_t byt[2];
+} pakmask;
+
+
+#ifdef USE_CLA
+
+extern uint32_t cla_tim[12];
+
+
+#if 0
+void bitbang_delay(uint16_t count)
+{
+  uint16_t  idx;
+
+  for (idx = 0; idx < count; idx ++)
+  {
+    asm("  mnop ");
+  }
+}
+#endif
+
+/* The WS2812b datasheet lists the following recommended bit timings:
+ *
+ * T0H - 0.4us   ( 80 clocks @200MHz)
+ * T1H - 0.8us   (160 clocks @200MHz)
+ * bit - 1.25us  (250 clocks @200MHz)
+ *
+ * However, studies have been done to show that this is widely variable, and that
+ * the device appears to sample the line voltage only to catch the start, then
+ * again mid-bit to determine 0 or 1. So the times can actually range:
+ *
+ * T0H - 0.063us to 0.56us  ( 13 to 112 clocks)
+ * T1H - 0.63us  to 0.90us  (126 to 180 clocks)
+ * bit - 1.1us  to >1.50us  (220 to 300 clocks)
+ *
+ * I will use these times:
+ *
+ * T0H - 0.25us  ( 50 clocks @200MHz)
+ * T1H - 0.75us  (150 clocks @200MHz)
+ * bit - 1.3us   (260 clocks @200MHz)
+ */
+
+#define DELAY(dlay)         {uint16_t i;  for (i = 0; i < dlay; i ++) { asm("  mnop "); }}
+
+#if 0
+//This function drives 2 consecutive GPIOs at the same time. The LED strings
+//must be the same length, and it can drive either type of WS281x LED. Because
+//of a quirk in shift instruction timing, the selected GPIO must be fixed.
+void bitbang_2gpio(uint16_t  num_led,
+                   uint16_t  gpio,     //first gpio number (12, 14 or 20)
+                   uint16_t  ledtype,  //0=WS2811, 1=WS2812
+                   uint32_t *str1,
+                   uint32_t *str2)
+{
+  uint16_t  idx;
+  uint16_t  bits;
+  uint16_t  eow;
+  pakmask   mask_0;
+  pakmask   mask_1;
+  uint32_t  mask_gpio;
+  uint32_t  clr1;
+  uint32_t  clr2;
+  uint16_t  delay[4];
+
+  bits = num_led * 8 * 3;
+  eow  = 0;
+
+#if 1
+  if (ledtype == WS2811)
+  {
+    delay[0] = 5;
+    delay[1] = 8;
+    delay[2] = 12;
+    delay[3] = 13;
+  }
+  else //WS2812
+  {
+    delay[0] = 5;
+    delay[1] = 2;
+    delay[2] = 1;
+    delay[3] = 2;
+  }
+#endif
+
+  /*** Prepare the loop. ***/
+  clr1 = *str1++;
+  clr2 = *str2++ << 1;
+  //Create a 1's mask for the 2 LED strings.
+  mask_1.all = (clr1 & 0x00800000) | (clr2 & 0x01000000);
+
+  #ifdef F28379
+    mask_gpio = 0x00000003 << (gpio - 0);
+
+    switch (gpio)
+    {
+      case 0:
+        mask_1.all >>= 7;
+        break;
+      case 2:
+        mask_1.all >>= 5;
+        break;
+      case 4:
+        mask_1.all >>= 3;
+        break;
+    }
+  #else //F28377
+    mask_gpio = 0x00003000 << (gpio - 12);
+
+    switch (gpio)
+    {
+      case 12:
+        mask_1.all >>= 11;
+        break;
+      case 14:
+        mask_1.all >>= 9;
+        break;
+      case 20:
+        mask_1.all >>= 3;
+        break;
+    }
+  #endif
+
+__mdebugstop();
+
+  //Clock the data out to the lights. This code will drive 2 GPIOs
+  //simultaneously, for 2 equal-length arrays of LEDs.
+  for (idx = 0; idx < bits; idx ++)
+  {
+    //***TIME 0: Set GPIOs high at clock 0. Keep others low.
+    #ifdef CLA_TIMING
+    cla_tim[0] = Epwm1Regs.TBCTR;
+    #endif
+
+    GpioDataRegs.GPASET.all = mask_gpio;
+    //Create a 0's mask for the 2 LED strings.
+    #ifdef F28379
+      mask_0.all = mask_1.byt[1] ^ mask_gpio;
+    #else //F28377
+      mask_0.all = mask_1.all ^ mask_gpio;
+    #endif
+
+//    bitbang_delay(delay[0]);
+    DELAY(delay[0]);
+
+    //***TIME 1: Set GPIOs for zero bits low.
+    //(ws2811 = clock 100, ws2812 = clock 80)
+    #ifdef CLA_TIMING
+    cla_tim[1] = Epwm1Regs.TBCTR;
+    #endif
+
+    GpioDataRegs.GPACLEAR.all = mask_0.all;
+
+//    bitbang_delay(delay[1]);
+    DELAY(delay[1]);
+
+    //***TIME 2: Set GPIOs for one bits low.
+    //(ws2811 = clock 240, ws2812 = clock 160)
+    #ifdef CLA_TIMING
+    cla_tim[2] = Epwm1Regs.TBCTR;
+    #endif
+
+    #ifdef F28379
+      GpioDataRegs.GPACLEAR.all = mask_1.byt[1];
+    #else //F28377
+      GpioDataRegs.GPACLEAR.all = mask_1.all;
+    #endif
+
+    //***TIME 3: Wait for end of bit time (prepare for the next bit).
+    //(ws2811 requires 500 clocks (at 200Mhz) per bit).
+    //(ws2812 requires 250 clocks (at 200Mhz) per bit).
+
+    eow ++;
+    if (eow == 24) //time to load the next led[]
+    {
+      eow  = 0;
+      clr1 = *str1++;
+      clr2 = *str2++ << 1;
+
+//      bitbang_delay(delay[2]);
+      #ifdef CLA_TIMING
+      cla_tim[4] = 1;
+      #endif
+      DELAY(delay[2]);
+    }
+    else
+    {
+      clr1 <<= 1;
+      clr2 <<= 1;
+
+//      bitbang_delay(delay[3]);
+      #ifdef CLA_TIMING
+      cla_tim[4] = 2;
+      #endif
+      DELAY(delay[3]);
+    }
+
+    //For some reason, shifting by a variable takes a huge number of cycles.
+    //Hence, the strange code:
+    mask_1.all = (clr1 & 0x00800000) | (clr2 & 0x01000000);
+
+    #ifdef F28379
+      switch (gpio)
+      {
+        case 0:
+          mask_1.all >>= 7;
+          break;
+        case 2:
+          mask_1.all >>= 5;
+          break;
+        case 4:
+          mask_1.all >>= 3;
+          break;
+      }
+    #else //F28377
+      switch (gpio)
+      {
+        case 12:
+          mask_1.all >>= 11;
+          break;
+        case 14:
+          mask_1.all >>= 9;
+          break;
+        case 20:
+          mask_1.all >>= 3;
+          break;
+      }
+    #endif
+
+    #ifdef CLA_TIMING
+    cla_tim[3] = Epwm1Regs.TBCTR;
+    #endif
+  }
+
+  #ifdef CLA_TIMING
+  {
+    cla_tim[1] = (cla_tim[1] - cla_tim[0]) * 4;
+    cla_tim[2] = (cla_tim[2] - cla_tim[0]) * 4;
+    cla_tim[3] = (cla_tim[3] - cla_tim[0]) * 4;
+  }
+  #endif
+}
+#endif
+
+
+//This function drives 3 GPIOs spaced by 1 (to reduce crosstalk). The LED strings
+//must be the same length, and it can drive either type of WS281x LED. Because
+//of a quirk in shift instruction timing, the selected GPIO must be fixed.
+void bitbang_3gpio(uint16_t  num_led,
+                   uint16_t  ledtype,    //0=WS2811, 1=WS2812
+                   uint16_t  gpiooffset, //0 or 1
+                   uint32_t *str1,
+                   uint32_t *str2,
+                   uint32_t *str3)
+{
+  uint16_t  idx;
+  uint16_t  bits;
+  uint16_t  eow;
+  uint32_t  mask_0;
+  uint32_t  mask_1;
+  uint32_t  mask_gpio;
+  uint32_t  clr1;
+  uint32_t  clr2;
+  uint32_t  clr3;
+  uint16_t  delay[4];
+
+  bits = num_led * 8 * 3;
+  eow  = 0;
+
+  if (ledtype == WS2811)
+  {
+    delay[0] = 5;
+    delay[1] = 8;
+    delay[2] = 12; //end of bit 23
+    delay[3] = 13; //end of bit 0..22
+  }
+  else //WS2812
+  {
+    delay[0] = 3; //1 3 0 1 for 50, 150 and 260... 2 2 0 1 for 80 160 250
+    delay[1] = 6;
+    delay[2] = 2; //end of bit 23
+    delay[3] = 3; //end of bit 0..22
+  }
+
+  /*** Prepare the loop. ***/
+  clr1 = *str1++;
+  clr2 = *str2++ << 2;
+  clr3 = *str3++ << 4;
+  //Create a 1's mask for the 3 LED strings.
+  mask_1 = (clr1 & 0x00800000) |
+           (clr2 & 0x02000000) |
+           (clr3 & 0x08000000);
+
+  #ifdef F28379
+    if (gpiooffset == 0)
+    {
+      mask_gpio = 0x00000015; //GPIOs 0, 2, 4
+      mask_1 >>= 23;
+    }
+    else
+    {
+      mask_gpio = 0x0000002a; //GPIOs 1, 3, 5
+      mask_1 >>= 22;
+    }
+  #else //F28377
+    if (gpiooffset == 0)
+    {
+      mask_gpio = 0x00015000; //GPIOs 12, 14, 16
+      mask_1 >>= 11;
+    }
+    else
+    {
+      mask_gpio = 0x0002a000; //GPIOs 13, 15, 17
+      mask_1 >>= 10;
+    }
+  #endif
+
+__mdebugstop();
+
+  //Clock the data out to the lights. This code will drive 3 GPIOs
+  //simultaneously, for 3 equal-length arrays of LEDs.
+  for (idx = 0; idx < bits; idx ++)
+  {
+    //***TIME 0: Set GPIOs high at clock 0. Keep others low.
+    #ifdef CLA_TIMING
+    cla_tim[0] = Epwm1Regs.TBCTR;
+    #endif
+
+    GpioDataRegs.GPASET.all = mask_gpio;
+    //Create a 0's mask for the 2 LED strings.
+    mask_0 = mask_1 ^ mask_gpio;
+
+//    bitbang_delay(delay[0]);
+    DELAY(delay[0]);
+
+    //***TIME 1: Set GPIOs for zero bits low.
+    //(ws2811 = clock 100, ws2812 = clock 80)
+    #ifdef CLA_TIMING
+    cla_tim[1] = Epwm1Regs.TBCTR;
+    #endif
+
+    GpioDataRegs.GPACLEAR.all = mask_0;
+
+//    bitbang_delay(delay[1]);
+    DELAY(delay[1]);
+
+    //***TIME 2: Set GPIOs for one bits low.
+    //(ws2811 = clock 240, ws2812 = clock 160)
+    #ifdef CLA_TIMING
+    cla_tim[2] = Epwm1Regs.TBCTR;
+    #endif
+
+    GpioDataRegs.GPACLEAR.all = mask_1;
+
+    //***TIME 3: Wait for end of bit time (prepare for the next bit).
+    //(ws2811 requires 500 clocks (at 200Mhz) per bit).
+    //(ws2812 requires 250 clocks (at 200Mhz) per bit).
+
+    eow ++;
+    if (eow == 24) //time to load the next led[]
+    {
+      eow  = 0;
+      clr1 = *str1++;
+      clr2 = *str2++ << 2;
+      clr3 = *str3++ << 4;
+
+//      bitbang_delay(delay[2]);
+      #ifdef CLA_TIMING
+      cla_tim[4] = 1;
+      #endif
+      DELAY(delay[2]);
+    }
+    else
+    {
+      clr1 <<= 1;
+      clr2 <<= 1;
+      clr3 <<= 1;
+
+//      bitbang_delay(delay[3]);
+      #ifdef CLA_TIMING
+      cla_tim[4] = 2;
+      #endif
+      DELAY(delay[3]);
+    }
+
+    //For some reason, shifting by a variable takes a huge number of cycles.
+    //Hence, the strange code:
+    mask_1 = (clr1 & 0x00800000) |
+             (clr2 & 0x02000000) |
+             (clr3 & 0x08000000);
+
+    #ifdef F28379
+      if (gpiooffset == 0)
+      {
+        mask_1 >>= 23;
+      }
+      else
+      {
+        mask_1 >>= 22;
+      }
+    #else //F28377
+      if (gpiooffset == 0)
+      {
+        mask_1 >>= 11;
+      }
+      else
+      {
+        mask_1 >>= 10;
+      }
+    #endif
+
+    #ifdef CLA_TIMING
+    cla_tim[3] = Epwm1Regs.TBCTR;
+    #endif
+  }
+
+  #ifdef CLA_TIMING
+  {
+    cla_tim[1] = (cla_tim[1] - cla_tim[0]) * 4;
+    cla_tim[2] = (cla_tim[2] - cla_tim[0]) * 4;
+    cla_tim[3] = (cla_tim[3] - cla_tim[0]) * 4;
+  }
+  #endif
+}
+
+#ifdef F28379
+#define GPIO_STR0   0
+#define GPIO_STR2   2
+#define GPIO_FLD0   4
+#else //F28377
+#define GPIO_STR0   12
+#define GPIO_STR2   14
+#define GPIO_FLD0   16
+#endif
+
+
+//#############################################################################
+// CLA tasks work like this:
+//   - Task 1 is highest priority, Task 8 is lowest
+//   - The current running task will complete uninterrupted, then the next
+//     highest pending task will begin.
+//   - It is an error to request a Task that is executing or pending.
+//   - A task may not call another task - there is no task nesting.
+
+//
+// Task 1 - Highest priority, drive the main display's LEDs
+//
+__interrupt void Cla1Task1( void )
+{
+  LED_MAIN  *led;
+  LED_FLOOD *fled;
+
+//  if (ppong_use == 0)
+  {
+    led = &led_ping[0];
+    fled = &fled_ping[0];
+  }
+//  else
+//  {
+//    led = &led_pong[0];
+//    fled = &fled_pong[0];
+//  }
+
+  bitbang_3gpio(LED_STRING_LEN,
+                LED_MAIN_TYPE,
+                0,
+               (uint32_t *)&led[0],
+               (uint32_t *)&led[LED_STRING_LEN*2],
+               (uint32_t *)&fled[0]);
+
+  bitbang_3gpio(LED_STRING_LEN,
+                LED_MAIN_TYPE,
+                1,
+               (uint32_t *)&led[LED_STRING_LEN],
+               (uint32_t *)&led[LED_STRING_LEN*3],
+               (uint32_t *)&fled[FLOOD_STRING_LEN]);
+}
+
+
+#if 0
+//
+// Task 2, drive optional flood LEDs
+//
+__interrupt void Cla1Task2( void )
+{
+  #ifdef FLOODS
+  LED_FLOOD *led;
+
+  if (ppong_use == 0)
+    led = &fled_ping[0];
+  else
+    led = &fled_pong[0];
+
+  bitbang_2gpio(FLOOD_STRING_LEN,
+                GPIO_FLD0,
+                LED_FLOOD_TYPE,
+               (uint32_t *)&led[0],
+               (uint32_t *)&led[FLOOD_STRING_LEN]);
+  #endif
+}
+
+
+//
+// Task 3
+//
+__interrupt void Cla1Task3( void )
+{
+    #if (CLA_DEBUG==1)
+    __mdebugstop();
+    #endif
+}
+
+//
+// Task 4
+//
+__interrupt void Cla1Task4( void )
+{
+    #if (CLA_DEBUG==1)
+    __mdebugstop();
+    #endif
+}
+
+//
+// Task 5
+//
+__interrupt void Cla1Task5( void )
+{
+    #if (CLA_DEBUG==1)
+    __mdebugstop();
+    #endif
+
+}
+
+//
+// Task 6
+//
+__interrupt void Cla1Task6( void )
+{
+    #if (CLA_DEBUG==1)
+    __mdebugstop();
+    #endif
+}
+
+//
+// Task 7
+//
+__interrupt void Cla1Task7( void )
+{
+    #if (CLA_DEBUG==1)
+    __mdebugstop();
+    #endif
+}
+
+//
+// Task 8 - Lowest priority
+//
+__interrupt void Cla1Task8( void )
+{
+    #if (CLA_DEBUG==1)
+    __mdebugstop();
+    #endif
+}
+#endif
+
+#endif  //USE_CLA

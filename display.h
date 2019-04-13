@@ -34,7 +34,7 @@ void wash(void);
 void color_organ_prep(float *fft_bin, uint16_t *chan_val);
 #endif
 
-void draw_char(int16_t x, int16_t y, int16_t idx, uint32_t color);
+void draw_char(LED_MAIN *led, int16_t x, int16_t y, int16_t idx, uint32_t color);
 void show_text(int16_t dispmode, int16_t panel, uint32_t color, int16_t delay, char *str);
 
 #endif

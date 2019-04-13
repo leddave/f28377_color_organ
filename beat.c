@@ -8,7 +8,7 @@
 #include "beat.h"
 
 #define GAP_LENGTH                     (FRAMES_PER_SEC * 3)
-#define GAP_LENGTH_LONG                (FRAMES_PER_SEC * 8) /* a gap longer than nornal inter-song time */
+#define GAP_LENGTH_LONG                (FRAMES_PER_SEC * 5) /* a gap longer than nornal inter-song time */
 #define MAX_BPM                        200 /* beats per minute */
 #define PEAK_SPACING                  ((FRAMES_PER_SEC * 60) / MAX_BPM)
 
@@ -26,8 +26,8 @@ int32_t  power_avg;
 int32_t  power_avg_buff[PEAK_FRAMES];
 
 
-extern uint16_t chan_max_left[COLOR_CHANNELS];
-extern uint16_t chan_max_right[COLOR_CHANNELS];
+extern uint16_t chan_max_left[MAX_CHANNELS];
+extern uint16_t chan_max_right[MAX_CHANNELS];
 
 
 void beat_init(void)
@@ -46,6 +46,8 @@ void beat_init(void)
 }
 
 
+#pragma CODE_SECTION(beat_detect, "ramCode")
+
 //These algorithms will use the peaks of the FFTs that run each frame.
 void beat_detect(void)
 {
@@ -53,10 +55,12 @@ void beat_detect(void)
 }
 
 
+#pragma CODE_SECTION(update_average_power, "ramCode")
+
 //This function will add the current channel data to the running average, then
 //determine if this frame is a peak, meaning that the power (magnitude) of this
 //frame is at least x% above the average.
-void update_average_power(void)
+void update_average_power(uint16_t channels)
 {
   uint16_t idx;
   uint32_t sum = 0;
@@ -84,7 +88,7 @@ void update_average_power(void)
 
     //Combine all L and R channels except the highest one to create a power value
     //for this frame.
-    for (idx = 0; idx < COLOR_CHANNELS-1; idx++)
+    for (idx = 0; idx < channels-1; idx++)
     {
       sum += chan_max_left[idx] + chan_max_right[idx];
     }
@@ -106,7 +110,10 @@ void update_average_power(void)
 
     //Find the average and 37% threshold
     power_avg /= ramp_frames;
-    peak_threshold = power_avg + (power_avg >> 1); //50% peak
+//    peak_threshold = power_avg + (power_avg >> 1); //50% peak
+//    peak_threshold = power_avg + (power_avg >> 1); //50%
+//    peak_threshold = power_avg + ((3 * power_avg) >> 2); //75% peak
+    peak_threshold = power_avg * 2; //100% peak
 
     //See if this frame is a peak
     if (sum >= peak_threshold)
@@ -129,9 +136,11 @@ void update_average_power(void)
 }
 
 
+#pragma CODE_SECTION(gap_detect, "ramCode")
+
 //This function sets a flag when a sequence of silent frames is found. A second
 //flag is then set to mark the end of the gap.
-void gap_detect(void)
+void gap_detect(uint16_t channels)
 {
   uint16_t idx;
   uint16_t all_zero = 1;
@@ -139,7 +148,7 @@ void gap_detect(void)
   end_of_gap = 0;
 
   //Look for all zeros for this frame:
-  for (idx = 0; idx < COLOR_CHANNELS; idx ++)
+  for (idx = 0; idx < channels; idx ++)
   {
     if ((chan_max_left[idx] > 0) || (chan_max_right[idx] > 0))
     {
@@ -176,10 +185,12 @@ void gap_detect(void)
 }
 
 
+#pragma CODE_SECTION(beat_detect_prep, "ramCode")
+
 //This function performs analysis of the processed FFT data for beat detection
 //and display purposes.
-void beat_detect_prep(void)
+void beat_detect_prep(uint16_t channels)
 {
-  gap_detect();
-  update_average_power();
+  gap_detect(channels);
+  update_average_power(channels);
 }

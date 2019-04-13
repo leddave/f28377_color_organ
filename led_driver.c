@@ -1,4 +1,8 @@
 /*****************************************************************************
+ *
+ * NOTE: With the use of CLA to drive LED GPIOs, the functions in this file
+ *       are no longer needed.
+ *
  * These file contains code to drive 24bit color data to strings of WS2811
  * or WS2812b addressable LEDs. The functions contained in this file are
  * timed precisely for the given CPU_SPEED. They must be executed out of
@@ -13,7 +17,7 @@
  * the desired colors. The user (incoming) array may be updated asynchronously
  * but captured at frame interval timer events.
  *
- * VERY IMPORTANT: This file MUST be compiled with -O2 and -opt_for_speed=2.
+ * VERY IMPORTANT: This file MUST be compiled with -O0 and -opt_for_speed=2.
  * If you change the project's settings, you need to verify that this file's
  * Build Settings have not changed. If they do, the LEDs will flash wildly.
  * To check, right click on the file in the Project Explorer, then click on
@@ -26,8 +30,7 @@
 
 
 //Global variables
-uint32_t  frame_cnt;
-uint16_t  pause;
+extern uint32_t  frame_cnt;
 
 #ifdef TIMING
 uint32_t  time_start;
@@ -36,28 +39,28 @@ uint32_t  time_idx;
 uint32_t  times[20];
 #endif
 
-volatile uint16_t frame_sync;
-extern   Led      led[MAX_LEDS]; //array of colors built elsewhere
+extern volatile uint16_t frame_sync;
+extern   LED_MAIN      led_ping[MAX_LEDS]; //array of colors built elsewhere
 
 #ifdef   FLOODS
-extern   Led      fled[FLOOD_LEDS]; //array of colors built elsewhere
+extern   LED_FLOOD     fled_ping[FLOOD_LEDS]; //array of colors built elsewhere
 #endif
 
 extern volatile struct CPUTIMER_REGS  CpuTimer1Regs;
 extern volatile struct GPIO_DATA_REGS GpioDataRegs;
 
 
+#ifndef USE_CLA
+
 void led_driver_init(void)
 {
   frame_cnt  = 0;
   frame_sync = 0;
-  pause      = 0;
 #ifdef TIMING
   time_idx   = 0;
   memset(times, 0, sizeof(times));
 #endif
 }
-
 
 #ifdef FOUR_GPIO
 
@@ -105,10 +108,10 @@ void send_led_data(void)
 #endif
 
   bits  = LED_STRING_LEN * 8 * 3;
-  str1 = (uint32_t *)&led[0];                 //Left channel, str1 and str2
-  str2 = (uint32_t *)&led[LED_STRING_LEN];
-  str3 = (uint32_t *)&led[LED_STRING_LEN*2];  //Right channel, str3 and str4
-  str4 = (uint32_t *)&led[LED_STRING_LEN*3];
+  str1 = (uint32_t *)&led_ping[0];                 //Left channel, str1 and str2
+  str2 = (uint32_t *)&led_ping[LED_STRING_LEN];
+  str3 = (uint32_t *)&led_ping[LED_STRING_LEN*2];  //Right channel, str3 and str4
+  str4 = (uint32_t *)&led_ping[LED_STRING_LEN*3];
   eow  = 0;
 
   //Prepare the loop. The flip32 intrinsic bit reverses a 32bit word. In our
@@ -243,13 +246,15 @@ void send_led_data(void)
 #endif //FOUR_GPIO
 
 
-#ifndef FLOODS
+//#ifndef FLOODS
 
+#ifndef USE_CLA
 //These two functions can be used if there are no floods. Floods also cannot be
 //used along with WS2811 panels since they take twice the cycles per bit, and
 //intermixing the timing of WS2811 and WS2812 cannot be done easily.
 #pragma CODE_SECTION(send_led_data_13, "ramCode")
 #pragma CODE_SECTION(send_led_data_24, "ramCode")
+
 
 //This function bit bangs LED bit data to two of four equal length strings.
 //It writes them to GPIOs 12 through 15, which are on F28377 Launchpad
@@ -286,8 +291,8 @@ void send_led_data_13(void)
 #endif
 
   bits  = LED_STRING_LEN * 8 * 3;
-  str1 = (uint32_t *)&led[0];                 //Left channel, str1 and str2
-  str3 = (uint32_t *)&led[LED_STRING_LEN*2];  //Right channel, str3 and str4
+  str1 = (uint32_t *)&led_ping[0];                 //Left channel, str1 and str2
+  str3 = (uint32_t *)&led_ping[LED_STRING_LEN*2];  //Right channel, str3 and str4
   eow  = 0;
 
   //Prepare the loop. The flip32 intrinsic bit reverses a 32bit word. In our
@@ -325,6 +330,11 @@ void send_led_data_13(void)
     asm("  nop ");
     asm("  nop ");
 
+#ifdef WS2811
+//    asm("  nop ");
+//    asm("  nop ");
+#endif
+
     //***TIME 2: Set GPIOs for one bits low.
     //(ws2811 = clock 240, ws2812 = clock 160)
    *gpio[0] = mask_1;
@@ -351,15 +361,17 @@ void send_led_data_13(void)
       for (idx2 = 0; idx2 < DELAY3b; idx2 ++)
         asm("  nop ");
 
+#ifndef WS2811
       asm("  nop ");
       asm("  nop ");
+#endif
       asm("  nop ");
       asm("  nop ");
       asm("  nop ");
       asm("  nop ");
     }
 
-    //Create a 1's mask and a 0's mask for the 4 LED strings (for GPIOs 12..15).
+    //Create a 1's mask and a 0's mask for the 2 LED strings (for GPIOs 12, 14).
     mask_1 = ((clr1 & 0x10) | (clr3 & 0x40)) << 8;
     mask_0 = ~mask_1 & 0x5000;
   }
@@ -394,8 +406,8 @@ void send_led_data_24(void)
 #endif
 
   bits  = LED_STRING_LEN * 8 * 3;
-  str2 = (uint32_t *)&led[LED_STRING_LEN];
-  str4 = (uint32_t *)&led[LED_STRING_LEN*3];
+  str2 = (uint32_t *)&led_ping[LED_STRING_LEN];
+  str4 = (uint32_t *)&led_ping[LED_STRING_LEN*3];
   eow  = 0;
 
   //Prepare the loop. The flip32 intrinsic bit reverses a 32bit word. In our
@@ -433,6 +445,11 @@ void send_led_data_24(void)
     asm("  nop ");
     asm("  nop ");
 
+#ifdef WS2811
+//    asm("  nop ");
+//    asm("  nop ");
+#endif
+
     //***TIME 2: Set GPIOs for one bits low.
     //(ws2811 = clock 240, ws2812 = clock 160)
    *gpio[0] = mask_1;
@@ -459,8 +476,10 @@ void send_led_data_24(void)
       for (idx2 = 0; idx2 < DELAY3b; idx2 ++)
         asm("  nop ");
 
+#ifndef WS2811
       asm("  nop ");
       asm("  nop ");
+#endif
       asm("  nop ");
       asm("  nop ");
       asm("  nop ");
@@ -474,7 +493,8 @@ void send_led_data_24(void)
 
   EINT;
 }
-#endif //if not FLOODS
+#endif //if not USE_CLA
+//#endif //if not FLOODS
 
 
 #ifdef FLOODS
@@ -483,7 +503,7 @@ void send_led_data_24(void)
 #pragma CODE_SECTION(send_led_data_24_flood2, "ramCode")
 
 //This function bit bangs LED bit data to two panel strings and one flood.
-//It writes them to GPIOs 12, 14 and 20. It assumes the three strings are
+//It writes them to GPIOs 12, 14 and 16. It assumes the three strings are
 //of equal length. If one of the strings is shorter (in this case, the
 //flood string), the code will stream garbage to non-existent LED pixels.
 //
@@ -518,9 +538,9 @@ void send_led_data_13_flood1(void)
 #endif
 
   bits  = LED_STRING_LEN * 8 * 3;
-  str1 = (uint32_t *)&led[0];                 //Left channel, str1 and str2
-  str3 = (uint32_t *)&led[LED_STRING_LEN*2];  //Right channel, str3 and str4
-  strf = (uint32_t *)&fled[0];                //Left channel flood
+  str1 = (uint32_t *)&led_ping[0];                 //Left channel, str1 and str2
+  str3 = (uint32_t *)&led_ping[LED_STRING_LEN*2];  //Right channel, str3 and str4
+  strf = (uint32_t *)&fled_ping[0];                //Left channel flood
   eow  = 0;
 
   //Prepare the loop. The flip32 intrinsic bit reverses a 32bit word. In our
@@ -531,15 +551,16 @@ void send_led_data_13_flood1(void)
 
   //Create a 1's mask and a 0's mask for 3 LED strings (for GPIOs 12, 14 and 20).
   mask_1 = ((clr1 & 0x10) | (clr3 & 0x40)) << 8;
-  mask_1 |= (clrf & 0x10) << 16;
-  mask_0 = ~mask_1 & 0x00105000;
+  mask_1 |= (clrf & 0x10) << 12;
+//  mask_0 = ~mask_1 & 0x00105000;
+  mask_0 = ~mask_1 & 0x00015000;
 
   //Clock the data out to the lights. This code will drive 3 GPIOs simultaneously.
   for (idx = 0; idx < bits; idx ++)
   {
 
     //***TIME 0: Set GPIOs 12, 14 and 20 high at clock 0. Keep 13, 15 and 21 low.
-   *gpio[1] = 0x00105000;
+   *gpio[1] = 0x00015000;
 
     for (idx2 = 0; idx2 < DELAY1; idx2 ++)
     {
@@ -553,11 +574,10 @@ void send_led_data_13_flood1(void)
    *gpio[0] = mask_0;
 
     for (idx2 = 0; idx2 < DELAY2; idx2 ++)
+    {
       asm("  nop ");
-
-    asm("  nop ");
-    asm("  nop ");
-    asm("  nop ");
+      asm("  nop ");
+    }
 
     //***TIME 2: Set GPIOs for one bits low.
     //(ws2811 = clock 240, ws2812 = clock 160)
@@ -577,8 +597,6 @@ void send_led_data_13_flood1(void)
 
       for (idx2 = 0; idx2 < DELAY3a; idx2 ++)
         asm("  nop ");
-
-      asm("  nop ");
     }
     else
     {
@@ -586,17 +604,17 @@ void send_led_data_13_flood1(void)
       clr3 >>= 1;
       clrf >>= 1;
 
-      for (idx2 = 0; idx2 < DELAY3b; idx2 ++)
-        asm("  nop ");
+//      for (idx2 = 0; idx2 < DELAY3b; idx2 ++)
+//        asm("  nop ");
 
-      asm("  nop ");
-      asm("  nop ");
+//      asm("  nop ");
+//      asm("  nop ");
     }
 
     //Create a 1's mask and a 0's mask for 3 LED strings (for GPIOs 12, 14 and 20).
     mask_1 = ((clr1 & 0x10) | (clr3 & 0x40)) << 8;
-    mask_1 |= (clrf & 0x10) << 16;
-    mask_0 = ~mask_1 & 0x00105000;
+    mask_1 |= (clrf & 0x10) << 12;
+    mask_0 = ~mask_1 & 0x00015000;
   }
 
   EINT;
@@ -638,9 +656,9 @@ void send_led_data_24_flood2(void)
 #endif
 
   bits  = LED_STRING_LEN * 8 * 3;
-  str2 = (uint32_t *)&led[LED_STRING_LEN];
-  str4 = (uint32_t *)&led[LED_STRING_LEN*3];
-  strf = (uint32_t *)&fled[FLOOD_STRING_MEM_LEN];
+  str2 = (uint32_t *)&led_ping[LED_STRING_LEN];
+  str4 = (uint32_t *)&led_ping[LED_STRING_LEN*3];
+  strf = (uint32_t *)&fled_ping[FLOOD_STRING_LEN];
   eow  = 0;
 
   //Prepare the loop. The flip32 intrinsic bit reverses a 32bit word. In our
@@ -651,8 +669,9 @@ void send_led_data_24_flood2(void)
 
   //Create a 1's mask and a 0's mask for 3 LED strings (for GPIOs 13, 15 and 21).
   mask_1 = ((clr2 & 0x20) | (clr4 & 0x80)) << 8;
-  mask_1 |= (clrf & 0x20) << 16;
-  mask_0 = ~mask_1 & 0x0020a000;
+  mask_1 |= (clrf & 0x20) << 12;
+//  mask_0 = ~mask_1 & 0x0020a000;
+  mask_0 = ~mask_1 & 0x0002a000;
 
   //Clock the data out to the lights. This code will drive 2 GPIOs
   //simultaneously, for 4 equal-length arrays of LEDs.
@@ -660,7 +679,7 @@ void send_led_data_24_flood2(void)
   {
 
     //***TIME 0: Set GPIOs 13, 15 and 21 high at clock 0. Keep 12, 14 and 20 low.
-   *gpio[1] = 0x0020a000;
+   *gpio[1] = 0x0002a000;
 
     for (idx2 = 0; idx2 < DELAY1; idx2 ++)
     {
@@ -674,11 +693,10 @@ void send_led_data_24_flood2(void)
    *gpio[0] = mask_0;
 
     for (idx2 = 0; idx2 < DELAY2; idx2 ++)
+    {
       asm("  nop ");
-
-    asm("  nop ");
-    asm("  nop ");
-    asm("  nop ");
+      asm("  nop ");
+    }
 
     //***TIME 2: Set GPIOs for one bits low.
     //(ws2811 = clock 240, ws2812 = clock 160)
@@ -699,8 +717,6 @@ void send_led_data_24_flood2(void)
 
       for (idx2 = 0; idx2 < DELAY3a; idx2 ++)
         asm("  nop ");
-
-      asm("  nop ");
     }
     else
     {
@@ -708,17 +724,17 @@ void send_led_data_24_flood2(void)
       clr4 >>= 1;
       clrf >>= 1;
 
-      for (idx2 = 0; idx2 < DELAY3b; idx2 ++)
-        asm("  nop ");
+//      for (idx2 = 0; idx2 < DELAY3b; idx2 ++)
+//        asm("  nop ");
 
-      asm("  nop ");
-      asm("  nop ");
+//      asm("  nop ");
+//      asm("  nop ");
     }
 
     //Create a 1's mask and a 0's mask for 3 LED strings (for GPIOs 13, 15 and 21).
     mask_1 = ((clr2 & 0x20) | (clr4 & 0x80)) << 8;
-    mask_1 |= (clrf & 0x20) << 16;
-    mask_0 = ~mask_1 & 0x0020a000;
+    mask_1 |= (clrf & 0x20) << 12;
+    mask_0 = ~mask_1 & 0x0002a000;
   }
 
   EINT;
@@ -758,9 +774,9 @@ void send_flood_data(void)
   time_start = CpuTimer1Regs.TIM.all;
 #endif
 
-  bits = FLOOD_STRING_MEM_LEN * 8 * 3;
-  str1 = (uint32_t *)&fled[0];
-  str2 = (uint32_t *)&fled[FLOOD_STRING_MEM_LEN];
+  bits = FLOOD_STRING_LEN * 8 * 3;
+  str1 = (uint32_t *)&fled_ping[0];
+  str2 = (uint32_t *)&fled_ping[FLOOD_STRING_LEN];
   eow  = 0;
 
   //Prepare the loop. The flip32 intrinsic bit reverses a 32bit word. In our
@@ -849,6 +865,7 @@ void send_flood_data(void)
 #endif
 #endif
 
+#pragma CODE_SECTION(led_driver, "ramCode")
 
 // This main driver function should be called at each timer interrupt. WS8211
 // and WS2812 LEDs require 24bits/LED when the colors need to change. Since
@@ -856,8 +873,6 @@ void send_flood_data(void)
 void led_driver(void)
 {
 
-  if (pause == 0)
-  {
   #ifndef FLOODS
     send_led_data_13();
     send_led_data_24();
@@ -866,8 +881,9 @@ void led_driver(void)
     send_led_data_13_flood1();
     send_led_data_24_flood2();
   #endif
-  }
 
   //Set frame_sync for pattern generation (1 means the data was sent)
   frame_sync = 0;
 }
+
+#endif

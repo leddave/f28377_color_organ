@@ -12,10 +12,11 @@
 //New characters must be inserted to preserve this ordering, and the offset
 //#defines above adjusted so they still point to the correct entries.  Make
 //sure you insert the new characters in both 8x6 and 6x4 fonts identically.
+#pragma DATA_SECTION(fontchar, "ramConsts")
 
 const font_t fontchar[NUM_FONT_CHAR] =
 {
-  #ifdef LARGE_ARRAY
+  #ifndef SMALL_FONT
   //Define the 8x6 font.
   //Each byte is a column of pixels, top-down. A '1' bit means to
   //turn that LED on at that position.

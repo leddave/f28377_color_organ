@@ -5,9 +5,12 @@
 #include <string.h>
 #include "globals.h"
 #include "display.h"
-#include "led_driver.h"
+#include "rfft.h"
 #include "utils.h"
+#include "floods.h"
 #include "font.h"
+#include "led_driver.h"
+#include "msg.h"
 
 
 //Define the overall array of LED panels. The current design is for each panel
@@ -16,74 +19,66 @@
 //col[][] and panel_off[][].
 #define NUM_PANEL    NUM_STRINGS
 
-#ifdef  LARGE_ARRAY
 #define PANEL_ROW    8
 #define PANEL_COL    36
 #define TBT_STEP     3
 #define MAX_ROW     (PANEL_ROW * 2)
 #define MAX_COL     (PANEL_COL * 2)
 
-#else
-#define PANEL_ROW    10
-#define PANEL_COL    12
-#define TBT_STEP     2
-#define MAX_ROW      PANEL_ROW
-#define MAX_COL     (PANEL_COL * NUM_PANEL)
-#endif
-
 #define TBT_ROW          (MAX_ROW / TBT_STEP)
 #define TBT_COL          (MAX_COL / TBT_STEP)
 
 #define TBT_CHAN_BLOCKS  (TBT_ROW * TBT_COL / COLOR_CHANNELS / 2)
-#define OLD_STYLE_BULBS
 
 #ifdef FLOODS
 #define HYST_SIZE    3
 #endif
 
 //Global variables
-Led       led[MAX_LEDS];       //the array of color information used by the LED driver
+#pragma DATA_SECTION(led_ping, "leddata")
+//#pragma DATA_SECTION(led_pong, "leddata")
+LED_MAIN  led_ping[MAX_LEDS];  //array of color information used by the LED driver
+//LED_MAIN  led_pong[MAX_LEDS];
+
 uint32_t  work_buff[MAX_LEDS]; //temporary work buffer (can be used by all displays)
 uint32_t  disp_frames;
 uint32_t  display_frames;      //used only in the display driver
-uint32_t  display_mode;
+uint16_t  color_channels;
+uint16_t  last_chan_cnt;
 uint16_t  display;
 uint16_t  gap_display;
 uint16_t  gap_color;
 uint16_t  gap_timer;
+uint16_t  bass_chan;
+uint16_t  midr_chan;
+uint16_t  led_response;
+uint16_t  flood_response;
+uint16_t  avail_disp;
+float     audio_gain;
 
-Led       color_tab_left[COLOR_CHANNELS];
-Led       color_tab_right[COLOR_CHANNELS];
-
-#ifdef FLOODS
-Led       fled[FLOOD_LEDS];
-uint16_t  top_chan_l[MAX_CHAN];  //Color channels for the frame sorted by power
-uint16_t  top_chan_l_prev[MAX_CHAN];
-uint16_t  top_chan_r[MAX_CHAN];
-uint16_t  top_chan_r_prev[MAX_CHAN];
-uint16_t  top_chan_l_lvl[MAX_CHAN];
-uint16_t  top_chan_r_lvl[MAX_CHAN];
-uint16_t  hyst_l[COLOR_CHANNELS][HYST_SIZE];
-uint16_t  hyst_r[COLOR_CHANNELS][HYST_SIZE];
-uint16_t  hyst_sum_l[COLOR_CHANNELS];
-uint16_t  hyst_sum_r[COLOR_CHANNELS];
-uint16_t  chan_count_l;
-uint16_t  chan_count_r;
-uint16_t  hyst_idx;
-uint16_t  wash_row;
-uint16_t  wash_col;
-uint16_t  wash_clr_idx;
-#endif
-
+LED_MAIN  color_tab_left[MAX_CHANNELS];
+LED_MAIN  color_tab_right[MAX_CHANNELS];
+uint32_t  channel_color[MAX_CHANNELS]; //current color for each channel
+uint16_t  channel_freq[MAX_CHANNELS+1]; //current freq bin for each channel
 
 //Temporary storage for the two-by-two function
-uint16_t tbt_map[TBT_ROW][TBT_COL];
+uint16_t tbt_map[TBT_ROW][TBT_COL/2];
 
-extern uint16_t pause;
 extern volatile uint16_t frame_sync;
 extern volatile uint16_t end_of_gap;
 extern volatile uint32_t gap_frames;
 extern volatile uint32_t frame_cnt;
+
+//These globals are defined in the CPU -> CLA message RAM
+extern uint16_t  ppong_fill;
+extern uint16_t  ppong_use;
+
+//Needed for the high res equalizer display
+extern float RFFTmagBuff1[RFFT_SIZE/2+1];
+extern float RFFTmagBuff2[RFFT_SIZE/2+1];
+
+extern Msg_Default_Values defaults;
+extern Msg_Available_Capabilities capabilities;
 
 
 // The following tables are built to convert a 2D y:x position into an index
@@ -91,7 +86,6 @@ extern volatile uint32_t frame_cnt;
 
 #pragma DATA_SECTION(col, "ramConsts")
 
-#ifdef LARGE_ARRAY
 //Define a "wide" 2x2 panel arrangement:
 const uint16_t col[MAX_ROW][MAX_COL] = // y rows by x cols
  //panel 0                                                                                                                                                                             panel 2
@@ -113,70 +107,17 @@ const uint16_t col[MAX_ROW][MAX_COL] = // y rows by x cols
  {503, 502, 501, 500, 499, 498, 497, 496, 495, 494, 493, 492, 491, 490, 489, 488, 487, 486, 485, 484, 483, 482, 481, 480, 479, 478, 477, 476, 475, 474, 473, 472, 471, 470, 469, 468,  1079, 1078, 1077, 1076, 1075, 1074, 1073, 1072, 1071, 1070, 1069, 1068, 1067, 1066, 1065, 1064, 1063, 1062, 1061, 1060, 1059, 1058, 1057, 1056, 1055, 1054, 1053, 1052, 1051, 1050, 1049, 1048, 1047, 1046, 1045, 1044},
  {504, 505, 506, 507, 508, 509, 510, 511, 512, 513, 514, 515, 516, 517, 518, 519, 520, 521, 522, 523, 524, 525, 526, 527, 528, 529, 530, 531, 532, 533, 534, 535, 536, 537, 538, 539,  1080, 1081, 1082, 1083, 1084, 1085, 1086, 1087, 1088, 1089, 1090, 1091, 1092, 1093, 1094, 1095, 1096, 1097, 1098, 1099, 1100, 1101, 1102, 1103, 1104, 1105, 1106, 1107, 1108, 1109, 1110, 1111, 1112, 1113, 1114, 1115},
  {575, 574, 573, 572, 571, 570, 569, 568, 567, 566, 565, 564, 563, 562, 561, 560, 559, 558, 557, 556, 555, 554, 553, 552, 551, 550, 549, 548, 547, 546, 545, 544, 543, 542, 541, 540,  1151, 1150, 1149, 1148, 1147, 1146, 1145, 1144, 1143, 1142, 1141, 1140, 1139, 1138, 1137, 1136, 1135, 1134, 1133, 1132, 1131, 1130, 1129, 1128, 1127, 1126, 1125, 1124, 1123, 1122, 1121, 1120, 1119, 1118, 1117, 1116}};
-#else
-//Define a "wide" 1x4 panel arrangement:
-const uint16_t col[MAX_ROW][MAX_COL] = // y rows by x cols
- //panel 0                                                     panel 1                                                      panel 2                                                      panel 3
-{{ 11,  10,   9,   8,   7,   6,   5,   4,   3,   2,   1,   0,  131, 130, 129, 128, 127, 126, 125, 124, 123, 122, 121, 120,  251, 250, 249, 248, 247, 246, 245, 244, 243, 242, 241, 240,  371, 370, 369, 368, 367, 366, 365, 364, 363, 362, 361, 360},
- { 12,  13,  14,  15,  16,  17,  18,  19,  20,  21,  22,  23,  132, 133, 134, 135, 136, 137, 138, 139, 140, 141, 142, 143,  252, 253, 254, 255, 256, 257, 258, 259, 260, 261, 262, 263,  372, 373, 374, 375, 376, 377, 378, 379, 380, 381, 382, 383},
- { 35,  34,  33,  32,  31,  30,  29,  28,  27,  26,  25,  24,  155, 154, 153, 152, 151, 150, 149, 148, 147, 146, 145, 144,  275, 274, 273, 272, 271, 270, 269, 268, 267, 266, 265, 264,  395, 394, 393, 392, 391, 390, 389, 388, 387, 386, 385, 384},
- { 36,  37,  38,  39,  40,  41,  42,  43,  44,  45,  46,  47,  156, 157, 158, 159, 160, 161, 162, 163, 164, 165, 166, 167,  276, 277, 278, 279, 280, 281, 282, 283, 284, 285, 286, 287,  396, 397, 398, 399, 400, 401, 402, 403, 404, 405, 406, 407},
- { 59,  58,  57,  56,  55,  54,  53,  52,  51,  50,  49,  48,  179, 178, 177, 176, 175, 174, 173, 172, 171, 170, 169, 168,  299, 298, 297, 296, 295, 294, 293, 292, 291, 290, 289, 288,  419, 418, 417, 416, 415, 414, 413, 412, 411, 410, 409, 408},
- { 60,  61,  62,  63,  64,  65,  66,  67,  68,  69,  70,  71,  180, 181, 182, 183, 184, 185, 186, 187, 188, 189, 190, 191,  300, 301, 302, 303, 304, 305, 306, 307, 308, 309, 310, 311,  420, 421, 422, 423, 424, 425, 426, 427, 428, 429, 430, 431},
- { 83,  82,  81,  80,  79,  78,  77,  76,  75,  74,  73,  72,  203, 202, 201, 200, 199, 198, 197, 196, 195, 194, 193, 192,  323, 322, 321, 320, 319, 318, 317, 316, 315, 314, 313, 312,  443, 442, 441, 440, 439, 438, 437, 436, 435, 434, 433, 432},
- { 84,  85,  86,  87,  88,  89,  90,  91,  92,  93,  94,  95,  204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214, 215,  324, 325, 326, 327, 328, 329, 330, 331, 332, 333, 334, 335,  444, 445, 446, 447, 448, 449, 450, 451, 452, 453, 454, 455},
- {107, 106, 105, 104, 103, 102, 101, 100,  99,  98,  97,  96,  227, 226, 225, 224, 223, 222, 221, 220, 219, 218, 217, 216,  347, 346, 345, 344, 343, 342, 341, 340, 339, 338, 337, 336,  467, 466, 465, 464, 463, 462, 461, 460, 459, 458, 457, 456},
- {108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119,  228, 229, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239,  348, 349, 350, 351, 352, 353, 354, 355, 356, 357, 358, 359,  468, 469, 470, 471, 472, 473, 474, 475, 476, 477, 478, 479}};
-#endif
-
-#ifdef FLOODS
-
-#define FLOOD_ROW      16
-#define FLOOD_COL      16
-
-#pragma DATA_SECTION(col, "ramConsts")
-
-//Define an octagonal arrangement:
-const uint16_t fcol[FLOOD_ROW][FLOOD_COL] = // y rows by x cols
-{{ 15, 16, 47, 48, 79, 80, 111, 112, 143, 144, 175, 176, 207, 208, 239, 240},
- { 14, 17, 46, 49, 78, 81, 110, 113, 142, 145, 174, 177, 206, 209, 238, 241},
- { 13, 18, 45, 50, 77, 82, 109, 114, 141, 146, 173, 178, 205, 210, 237, 242},
- { 12, 19, 44, 51, 76, 83, 108, 115, 140, 147, 172, 179, 204, 211, 236, 243},
- { 11, 20, 43, 52, 75, 84, 107, 116, 139, 148, 171, 180, 203, 212, 235, 244},
- { 10, 21, 42, 53, 74, 85, 106, 117, 138, 149, 170, 181, 202, 213, 234, 245},
- {  9, 22, 41, 54, 73, 86, 105, 118, 137, 150, 169, 182, 201, 214, 233, 246},
- {  8, 23, 40, 55, 72, 87, 104, 119, 136, 151, 168, 183, 200, 215, 232, 247},
- {  7, 24, 39, 56, 71, 88, 103, 120, 135, 152, 167, 184, 199, 216, 231, 248},
- {  6, 25, 38, 57, 70, 89, 102, 121, 134, 153, 166, 185, 198, 217, 230, 249},
- {  5, 26, 37, 58, 69, 90, 101, 122, 133, 154, 165, 186, 197, 218, 229, 250},
- {  4, 27, 36, 59, 68, 91, 100, 123, 132, 155, 164, 187, 196, 219, 228, 251},
- {  3, 28, 35, 60, 67, 92,  99, 124, 131, 156, 163, 188, 195, 220, 227, 252},
- {  2, 29, 34, 61, 66, 93,  98, 125, 130, 157, 162, 189, 194, 221, 226, 253},
- {  1, 30, 33, 62, 65, 94,  97, 126, 129, 158, 161, 190, 193, 222, 225, 254},
- {  0, 31, 32, 63, 64, 95,  96, 127, 128, 159, 160, 191, 192, 223, 224, 255}};
-#endif
 
 
 //This determines the panel's position in the logical [row, col] array.
-#ifdef LARGE_ARRAY
 const uint16_t panel_off[NUM_PANEL][2] =
 {{0,         0},          //panel 0:  y=0, x=0
  {PANEL_ROW, 0},          //panel 1:  y=8, x=0
  {0,         PANEL_COL},  //panel 2:  y=0, x=36
  {PANEL_ROW, PANEL_COL}}; //panel 3:  y=8, x=36
-#else
-const uint16_t panel_off[NUM_PANEL][2] =
-{{0, 0},                  //panel 0:  y=0, x=0
- {0, PANEL_COL},          //panel 1:  y=0, x=12
- {0, PANEL_COL*2},        //panel 2:  y=0, x=24
- {0, PANEL_COL*3}};       //panel 3:  y=0, x=36
-#endif
 
 
 #pragma DATA_SECTION(rainbow, "ramConsts")
-#define MAX_RGB_VAL           0xf0
-#define MID_RGB_VAL           0x78
-#define MIN_RGB_VAL           0x28
 
 //The function get_rgb() can be used to break these colors into component values.
 const uint32_t rainbow[12] = {0xf00000,  //red
@@ -192,97 +133,200 @@ const uint32_t rainbow[12] = {0xf00000,  //red
                               0x680088,  //purple
                               0x800072}; //fushia
 
-
-/*  Nine channel, one octave per channel color organ
-    Frequency ranges: (44Khz sample rate, 86Hz per bin)
-
-    Octave 1:      0.. 85Hz    bin: 0         color: Red
-    Octave 2:     86..171Hz    bin: 1         color: Fushia
-    Octave 3:    172..343Hz    bin: 2..3      color: Purple
-    Octave 4:    344..687Hz    bin: 4..7      color: Blue
-    Octave 5:    688..1375Hz   bin: 8..15     color: Aqua
-    Octave 6:   1376..2751Hz   bin: 16..31    color: Cyan
-    Octave 7:   2752..5503Hz   bin: 32..63    color: Green
-    Octave 8:   5504..11007Hz  bin: 64..127   color: Lime
-    Octave 9+: 11008..20000Hz  bin: 128..232  color: Yellow
-
-    Or, three channel color organ frequency ranges:
-
-    Low:          0..257Hz    bin: 0..3      color: Red
-    Mid:        258..3439Hz   bin: 4..39     color: Blue
-    High:      3440..20000Hz  bin: 40..232   color: Green
-*/
-#ifdef NINE_OCTAVE_BIN
-const uint16_t chan_bin[COLOR_CHANNELS+1] = {0, 1, 2, 4, 8, 16, 32, 64, 128, 233};
-
-//This array maps into the rainbow[] array to assign colors to each color organ channel.
-const uint16_t chan_clr[COLOR_CHANNELS] = {0, 11, 10, 8, 7, 6, 4, 3, 2};
-#endif
-
-/*  Ten channel compressed frequency range color organ
-    Frequency ranges: (44Khz sample rate, 86Hz per bin)
-
-    Channel 1:      0.. 85Hz    pitch: c1..e2  16  bin: 0         color: Red
-    Channel 2:     86..171Hz    pitch: f2..e3  12  bin: 1         color: Orange
-    Channel 3:    172..429Hz    pitch: f3..g#4 16  bin: 2..4      color: Purple
-    Channel 4:    430..1117Hz   pitch: a4..c#6 17  bin: 5..12     color: Blue
-    Channel 5:   1118..1633Hz   pitch: d6..g#6  7  bin: 13..18    color: Aqua
-    Channel 6:   1634..2321Hz   pitch: a6..c#7  5  bin: 19..26    color: Cyan
-    Channel 7:   2322..3009Hz   pitch: d7..f#7  5  bin: 27..34    color: L Green
-    Channel 8:   3010..6019Hz   pitch: g7..f#8 12  bin: 35..69    color: Green
-    Channel 9:   6020..9029Hz   pitch: g8..c#9  7  bin: 70..104   color: Lime
-    Channel 10:  9030..16000Hz  pitch: d9..c10 11  bin: 105..185  color: Yellow
-*/
-
 #pragma DATA_SECTION(chan_bin, "ramConsts")
-const uint16_t chan_bin[COLOR_CHANNELS+1] = {0, 1, 2, 5, 13, 19, 27, 35, 70, 105, 185};
+#pragma DATA_SECTION(chan_clr, "ramConsts")
+
+//This array defines the range of FFT bins for each color organ channel.  At 86Hz
+//per bin, the starting frequency of each bin is x*86.
+const uint16_t chan_bin[MAX_CHANNELS+1][MAX_CHANNELS+2] = {
+ {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+ {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+ {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+
+/*  Three channel color organ frequency ranges:
+    Frequency ranges: (44.1Khz sample rate, 86Hz per bin)
+    (Middle C = c4, 262Hz)
+
+    Channel 1:     0..172Hz    a0-f3  bin: 0..1     color: Red
+    Channel 2:   172..1032Hz   f3-c6  bin: 2..11    color: Blue
+    Channel 3:  1032..15000Hz  c6-c8+ bin: 12..175  color: Green
+*/
+ {0, 2, 12, 175, 0, 0, 0, 0, 0, 0, 0, 0}, //3
+
+/*  Four channel color organ frequency ranges. Same as 3 channel plus
+    high frequency channel.
+
+    Channel 1:     0..172Hz    a0-f3  bin: 0..1     color: Red
+    Channel 2:   172..1032Hz   f3-c6  bin: 2..11    color: Blue
+    Channel 3:  1032..4214Hz   c6-c8 bin: 12..48    color: Green
+    Channel 4:  4214..15000Hz  c8+   bin: 49..175   color: Yellow
+*/
+ {0, 2, 12, 49, 175, 0, 0, 0, 0, 0, 0, 0}, //4
+
+/*  Five channel, ~two octaves per color organ channel
+    Frequency ranges: (44.1Khz sample rate, 86Hz per bin)
+
+    Channel 1:      0..172Hz   a0-f3  bin: 0..1      color: Red
+    Channel 2:    172..430Hz   f3-a5  bin: 2..4      color: Purple
+    Channel 3:    430..1032Hz  a5-c6  bin: 5..11     color: Blue
+    Channel 4:   1032..4214Hz  c6-c8  bin: 12..48    color: Green
+    Channel 5:   4214..15000Hz c8+    bin: 49..175   color: Yellow
+*/
+ {0, 2, 5, 12, 49, 175, 0, 0, 0, 0, 0, 0}, //5
+
+/*  Six channel, color organ channel
+    Frequency ranges: (44.1Khz sample rate, 86Hz per bin)
+
+    Channel 1:      0..172Hz   a0-f3  bin: 0..1      color: Red
+    Channel 2:    172..344Hz   f3-f4  bin: 2..3      color: Purple
+    Channel 3:    344..688Hz   f4-f5  bin: 4..7      color: Blue
+    Channel 4:    688..1720Hz  f5-a7  bin: 8..19     color: L green
+    Channel 5:   1720..4214Hz  a7-c8  bin: 20..48    color: Green
+    Channel 6:   4214..15000Hz c8+    bin: 49..175   color: Yellow
+*/
+ {0, 2, 4, 8, 20, 49, 175, 0, 0, 0, 0, 0},
+
+/*  Seven channel, ~one octave per color organ channel
+    Frequency ranges: (44.1Khz sample rate, 86Hz per bin)
+
+    Channel 1:      0..172Hz   a0-f3  bin: 0..1      color: Red
+    Channel 2:    172..344Hz   f3-f4  bin: 2..3      color: Purple
+    Channel 3:    344..688Hz   f4-f5  bin: 4..7      color: Blue
+    Channel 4:    688..1290Hz  f5-e6  bin: 8..14     color: L green
+    Channel 5:   1290..2322Hz  e6-d7  bin: 15..26    color: Green
+    Channel 6:   2322..4214Hz  d7-c8  bin: 27..48    color: Lime
+    Channel 7:   4214..15000Hz c8+    bin: 49..175   color: Yellow
+*/
+ {0, 2, 4, 8, 15, 27, 49, 175, 0, 0, 0, 0}, //7
+
+/*  Eight channel color organ channel
+    Frequency ranges: (44.1Khz sample rate, 86Hz per bin)
+
+    Channel 1:     0.. 86Hz    a0-f2   bin: 0        color: Red
+    Channel 2:    86..172Hz    f2-f3   bin: 1        color: Fushia
+    Channel 3:   172..344Hz    f3-f4   bin: 2..3     color: Purple
+    Channel 4:   344..688Hz    f4-f5   bin: 4..7     color: Blue
+    Channel 5:   688..1118Hz   f5-d6   bin: 8..12    color: Aqua
+    Channel 6:  1118..1978Hz   d6-b7   bin: 13..22   color: Cyan
+    Channel 7:  1978..2838Hz   b7-f7   bin: 23..32   color: Green
+    Channel 8:  4214..15000Hz  c8+     bin: 49..175  color: Yellow
+*/
+ {0, 1, 2, 4, 8, 13, 23, 49, 175, 0, 0, 0},
+
+/*  Nine channel color organ channel
+    Frequency ranges: (44.1Khz sample rate, 86Hz per bin)
+
+    Channel 1:     0.. 86Hz    a0-f2   bin: 0        color: Red
+    Channel 2:    86..172Hz    f2-f3   bin: 1        color: Fushia
+    Channel 3:   172..344Hz    f3-f4   bin: 2..3     color: Purple
+    Channel 4:   344..688Hz    f4-f5   bin: 4..7     color: Blue
+    Channel 5:   688..1118Hz   f5-d6   bin: 8..12    color: Aqua
+    Channel 6:  1118..1978Hz   d6-b7   bin: 13..22   color: Cyan
+    Channel 7:  1978..2838Hz   b7-f7   bin: 23..32   color: Green
+    Channel 8:  2838..4214Hz   f7-c8   bin: 33..48   color: Lime
+    Channel 9:  4214..15000Hz  c8+     bin: 49..175  color: Yellow
+*/
+ {0, 1, 2, 4, 8, 13, 23, 33, 49, 175, 0, 0}, //9
+
+/*  Ten channel color organ
+    Frequency ranges: (44.1Khz sample rate, 86Hz per bin)
+
+    Channel 1:     0.. 86Hz    a0-f2   bin: 0        color: Red
+    Channel 2:    86..172Hz    f2-f3   bin: 1        color: Orange
+    Channel 3:   172..344Hz    f3-f4   bin: 2..3     color: Purple
+    Channel 4:   344..602Hz    f4-d5   bin: 4..6     color: Blue
+    Channel 5:   602..860Hz    d5-a6   bin: 7..9     color: Aqua
+    Channel 6:   860..1290Hz   a6-e6   bin: 10..14   color: Cyan
+    Channel 7:  1290..1978Hz   e6-b7   bin: 15..22   color: L Green
+    Channel 8:  1978..3612Hz   b7-g7   bin: 23..35   color: Green
+    Channel 9:  3612..4214Hz   g7-c8   bin: 36..48   color: Lime
+    Channel 10: 4214..15000Hz  c8+     bin: 49..175  color: Yellow
+*/
+ {0, 1, 2, 4, 7, 10, 15, 23, 36, 49, 175, 0}};
+
 
 //This array maps into the rainbow[] array to assign colors to each color organ channel.
-#pragma DATA_SECTION(chan_clr, "ramConsts")
-const uint16_t chan_clr[COLOR_CHANNELS] = {0, 1, 11, 8, 7, 6, 5, 4, 3, 2};
-
-
-#ifdef FLOODS
-
-void reset_hyst(void)
-{
-  memset(hyst_l, 0, sizeof(hyst_l));
-  memset(hyst_r, 0, sizeof(hyst_r));
-  memset(hyst_sum_l, 0, sizeof(hyst_sum_l));
-  memset(hyst_sum_r, 0, sizeof(hyst_sum_r));
-  memset(top_chan_l_lvl, 0, sizeof(top_chan_l_lvl));
-  memset(top_chan_r_lvl, 0, sizeof(top_chan_r_lvl));
-  hyst_idx = 0;
-}
-#endif
+const uint16_t chan_clr[MAX_CHANNELS+1][MAX_CHANNELS] =
+{{0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+ {0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+ {0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+ {0, 8, 4, 0, 0, 0, 0, 0, 0, 0}, //3
+ {0, 8, 4, 2, 0, 0, 0, 0, 0, 0},
+ {0, 10, 8, 4, 2, 0, 0, 0, 0, 0}, //5
+ {0, 10, 8, 5, 4, 2, 0, 0, 0, 0},
+ {0, 10, 8, 5, 4, 3, 2, 0, 0, 0}, //7
+ {0, 11, 10, 8, 7, 6, 4, 2, 0, 0},
+ {0, 11, 10, 8, 7, 6, 4, 3, 2, 0}, //9
+ {0, 1, 11, 8, 7, 6, 5, 4, 3, 2}};
 
 
 void display_init(void)
 {
-  memset(led, 0, sizeof(led));
+  uint16_t idx;
+
+  memset(led_ping, 0, sizeof(led_ping));
+//  memset(led_pong, 0, sizeof(led_pong));
+
+  color_channels = 7;
+  last_chan_cnt = 7;
+  led_response = 2;
+  flood_response = 2;
+  avail_disp = (uint16_t)(defaults.disp_mask_hi) << 8 | defaults.disp_mask_lo;
+  audio_gain = 1.0;
+
   gap_frames = 9999;
   disp_frames = 99999;
   display     = 9999;
   display_frames = 99999;
-  display_mode = 4;
   gap_display = 9999;
   gap_color   = 9999;
   gap_timer   = 9999;
 
+  //find the approximate color channel boundaries for Bass and Midrange
+  for (idx = 0; idx < MAX_CHANNELS; idx++)
+  {
+    if (chan_bin[color_channels][idx] < 3)
+         bass_chan = idx;
+    if (chan_bin[color_channels][idx] < 30)
+         midr_chan = idx;
+
+    //Load default colors and freq range
+    channel_color[idx] = rainbow[chan_clr[color_channels][idx]];
+    channel_freq[idx]  = chan_bin[color_channels][idx];
+  }
+
+  channel_freq[MAX_CHANNELS] = chan_bin[color_channels][MAX_CHANNELS];
+
 #ifdef FLOODS
-  memset(fled, 0, sizeof(fled));
-  reset_hyst();
-  wash_row = 9999;
-  wash_col = 0;
+  init_floods();
 #endif
 }
 
+
+#pragma CODE_SECTION(reload_channel_data, "ramCode")
+
+void reload_channel_data(uint16_t chan)
+{
+  uint16_t idx;
+
+  for (idx = 0; idx < MAX_CHANNELS; idx++)
+  {
+    channel_color[idx] = rainbow[chan_clr[chan][idx]];
+
+    channel_freq[idx]  = chan_bin[chan][idx];
+    channel_freq[MAX_CHANNELS] = chan_bin[chan][MAX_CHANNELS];
+  }
+}
+
+
+#pragma CODE_SECTION(wait_for_sync, "ramCode")
 
 //This function blocks for the specified number of frame syncs to
 //expire.
 void wait_for_sync(uint32_t num_syncs)
 {
   uint16_t idx;
+  uint16_t pause;
 
   pause = 0;
 
@@ -291,10 +335,82 @@ void wait_for_sync(uint32_t num_syncs)
     while (frame_sync == 0)
     {  }
 
-    led_driver();
+    frame_sync = 0;
+
+    if (pause == 0)
+    {
+      #ifdef USE_CLA
+        Cla1ForceTask1();
+
+//        #ifdef FLOODS
+//        Cla1ForceTask2();
+//        #endif
+      #else
+        led_driver();
+      #endif
+    }
 
     pause = 1;
   }
+}
+
+
+#pragma CODE_SECTION(find_next_color, "ramCode")
+int16_t lastcolor[MAX_CHANNELS * 2];
+
+//DEBUG CODE DELETE:
+//uint16_t hist[100];
+//uint16_t hidx = 0;
+
+//This function looks through an array of counts (per channel) looking for a
+//count > 0. If found, it returns it; if not, returns -1.
+int16_t find_next_color(uint16_t startmask, uint16_t *currmask)
+{
+  int16_t  idx, cv;
+  uint16_t flag, dir;
+
+  if (*currmask == 0) //all colors have been used; reload available colors
+    *currmask = startmask;
+
+  cv   = rnd(color_channels);
+  flag = 1 << cv;
+
+  if ((flag & *currmask) == 0) //this color is taken; search for another one
+  {
+    dir = rnd(100);
+
+    for (idx = 0; idx < color_channels; idx ++)
+    {
+      if (dir < 50) //search downward
+      {
+        cv --;
+        if (cv < 0)
+          cv = color_channels-1;
+      }
+      else //search upward
+      {
+        cv ++;
+        if (cv >= color_channels)
+          cv = 0;
+      }
+
+      flag = 1 << cv;
+
+      if ((flag & *currmask) != 0)
+        break;
+    }
+  }
+
+  *currmask &= ~flag; //remove this color
+
+//DELETE THIS:::
+//if (hidx < 100)
+//{
+//hist[hidx++] = cv;
+//hist[hidx++] = *currmask;
+//}
+
+  return(cv); //found one
 }
 
 
@@ -324,7 +440,7 @@ void get_rgb_scaled(uint32_t color, uint16_t scale, uint16_t *r, uint16_t *g, ui
 }
 
 
-//This function creates a table of 10 colors, per channel. It can be called
+//This function creates a table of channel colors, per side. It can be called
 //just once per frame since the colors don't change within a frame.
 #pragma CODE_SECTION(build_color_table, "ramCode")
 
@@ -336,17 +452,16 @@ void build_color_table(uint16_t *left_val, uint16_t *right_val)
   uint32_t  color;
 
   //Create a table of colors for this frame
-  for (idx = 0; idx < COLOR_CHANNELS; idx ++)
+  for (idx = 0; idx < color_channels; idx ++)
   {
     scale = left_val[idx];
-    color = rainbow[chan_clr[idx]];
+    color = channel_color[idx];
     get_rgb(color, &r, &g, &b);
     color_tab_left[idx].r = (r * scale) >> 8;
     color_tab_left[idx].g = (g * scale) >> 8;
     color_tab_left[idx].b = (b * scale) >> 8;
 
     scale = right_val[idx];
-    color = rainbow[chan_clr[idx]];
     get_rgb(color, &r, &g, &b);
     color_tab_right[idx].r = (r * scale) >> 8;
     color_tab_right[idx].g = (g * scale) >> 8;
@@ -359,9 +474,8 @@ void build_color_table(uint16_t *left_val, uint16_t *right_val)
 
 void clear_display(void)
 {
-  memset(led, 0, sizeof(led));
-  wait_for_sync(1);
-  pause = 0;
+  memset(led_ping, 0, sizeof(led_ping));
+//  memset(led_pong, 0, sizeof(led_pong));
 }
 
 
@@ -371,18 +485,35 @@ void clear_display(void)
 //state and exit each frame so that the gap detect can run....
 void do_gap_display(void)
 {
-  uint16_t idx;
+  uint16_t idx, last_disp;
+  uint16_t last_color;
 
   #ifndef SLAVE
-  if (gap_frames % (FRAMES_PER_SEC * 12) == 0)
+  if (gap_frames % (FRAMES_PER_SEC * 10) == 0)
   {
     idx = rnd(9999);
-    gap_display = idx % 7;
-    gap_color   = rainbow[idx % 12];
     gap_timer   = 0;
+    last_disp   = gap_display;
+    gap_display = idx % 12;
+    last_color  = gap_color;
+    gap_color   = rainbow[rnd(12)];
+
+    if (gap_display == last_disp) //make sure the text changes
+    {
+      gap_display ++;
+      if (gap_display == 12)
+        gap_display = 0;
+    }
+
+    if (gap_color == last_color) //make sure the color changes
+    {
+      gap_color ++;
+      if (gap_color == 12)
+        gap_color = 0;
+    }
   }
 
-  if (gap_timer == 0)
+  if (gap_timer < 4)
   {
     switch (gap_display)
     {
@@ -402,30 +533,47 @@ void do_gap_display(void)
         show_text(1, 0, gap_color, 0, "WOO HOO!");
         break;
       case 5:
-        show_text(1, 0, gap_color, 0, "Let's Do It!");
+        show_text(1, 0, gap_color, 0, "Rock n Roll!");
         break;
       case 6:
-        show_text(1, 0, gap_color, 0, "You There?");
+        show_text(1, 0, gap_color, 0, "R U There?");
+        break;
+      case 7:
+        show_text(1, 0, gap_color, 0, "Weeeeeeee!");
+        break;
+      case 8:
+        show_text(1, 0, gap_color, 0, "Call Me!?");
+        break;
+      case 9:
+        show_text(1, 0, gap_color, 0, "Say What?");
+        break;
+      case 10:
+        show_text(1, 0, gap_color, 0, "Where r you?");
+        break;
+      case 11:
+        show_text(1, 0, gap_color, 0, "Party Time!");
         break;
     }
   }
 
-  if (gap_timer == 60)
+  if (gap_timer == 90)
     clear_display();
   gap_timer ++;
   #endif
 
   #ifdef FLOODS
   // Left-Right color fades
-  wash();
+  //wash();
+  flood_gap(gap_color, gap_color, gap_timer);
 
   reset_hyst();
   #endif
 }
 
 
+#if 0
 #pragma CODE_SECTION(copy_pixel, "ramCode")
-void copy_pixel(uint16_t dest, uint16_t src)
+void copy_pixel(LED_MAIN *led, uint16_t dest, uint16_t src)
 {
   led[dest].r = led[src].r;
   led[dest].g = led[src].g;
@@ -485,78 +633,12 @@ void pixel_up(void)
     wait_for_sync(2);
   }
 }
-
-
-#ifdef FLOODS
-
-#pragma CODE_SECTION(wash_pix, "ramCode")
-
-void wash_pix(uint16_t flood, uint16_t clr_idx, uint16_t column)
-{
-  uint32_t  tmp;
-  uint16_t  l1;
-  uint16_t  r, g, b;
-  uint16_t  cl = column;
-
-  tmp = rainbow[clr_idx];
-  get_rgb(tmp, &r, &g, &b);
-
-  l1 = fcol[wash_row][cl] + (FLOOD_STRING_MEM_LEN * flood);
-  fled[l1].r = r;
-  fled[l1].g = g;
-  fled[l1].b = b;
-
-  cl = FLOOD_COL - (1 + column);
-
-  l1 = fcol[wash_row][cl] + (FLOOD_STRING_MEM_LEN * flood);
-  fled[l1].r = r;
-  fled[l1].g = g;
-  fled[l1].b = b;
-}
-
-
-//This function creates a downward flowing color wash.
-#pragma CODE_SECTION(wash, "ramCode")
-
-void wash(void)
-{
-  uint16_t tmp_idx;
-
-  //Test for the starting condition
-  if (wash_row > FLOOD_ROW)
-  {
-    wash_row = FLOOD_ROW - 1;
-    wash_col = 0;
-    wash_clr_idx = rnd(12);
-  }
-
-  wash_pix(0, wash_clr_idx, wash_col); //flood 0
-
-  tmp_idx = wash_clr_idx + 2;
-  if (tmp_idx >= 12) tmp_idx -= 12;
-
-  wash_pix(1, tmp_idx, wash_col); //Flood 2
-
-
-  wash_col ++;
-  if (wash_col == (FLOOD_COL / 2)) //finished the row
-  {
-    wash_col = 0;
-    if (wash_row == 0)
-      wash_row = 9999;
-    else
-      wash_row --;
-  }
-
-  wait_for_sync(1);
-}
 #endif
 
 
 #pragma CODE_SECTION(line_segments, "ramCode")
 
-#define MIN_LINE_FRAMES                (FRAMES_PER_SEC * 5)
-#define LINE_MOVE_FRAMES                10
+#define MIN_LINE_FRAMES                (FRAMES_PER_SEC * 10)
 #define LINE_END                       ((MAX_ROW/2/2) * MAX_COL/2)
 
 //This function creates a display where short moving horizontal line segments
@@ -569,16 +651,23 @@ void line_segments(uint16_t peak_flag, uint16_t *left_val, uint16_t *right_val)
   uint16_t  cv;
   uint16_t  rw, cl;
   uint16_t *buff;
-  int16_t   chan_cnt[COLOR_CHANNELS];
-  Led      *cv_clr1;
-  Led      *cv_clr2;
+  int16_t   chan_cnt[MAX_CHANNELS];
+  LED_MAIN *cv_clr1;
+  LED_MAIN *cv_clr2;
+  LED_MAIN *led;
+
+//  if (ppong_fill == 0)
+    led = &led_ping[0];
+//  else
+//    led = &led_pong[0];
+
 
   if (peak_flag & (disp_frames > MIN_LINE_FRAMES))
   {
     disp_frames = 0;
 
-    for (idx = 0; idx < COLOR_CHANNELS; idx ++)
-      chan_cnt[idx] = (LINE_END / COLOR_CHANNELS) + 2;
+    for (idx = 0; idx < color_channels; idx ++)
+      chan_cnt[idx] = (LINE_END / color_channels) + 2;
 
     //Create a new random arrangement of line segments in the work buffer.
     //The arrangement is stored in a "run length encoded" (RLE) fashion.
@@ -588,15 +677,15 @@ void line_segments(uint16_t peak_flag, uint16_t *left_val, uint16_t *right_val)
     while (idx <= LINE_END)
     {
       idx2 = rnd(99999);
-      cv  = idx2 % COLOR_CHANNELS;   //random channel
+      cv  = idx2 % color_channels;   //random channel
       len = (idx2 % 4) + 3;          //random line length
 
       if (chan_cnt[cv] <= 0) //this channel has been "used up". Find another one
       {
-        for (idx2 = 0; idx2 < COLOR_CHANNELS; idx2 ++)
+        for (idx2 = 0; idx2 < color_channels; idx2 ++)
         {
           cv ++;
-          if (cv >= COLOR_CHANNELS) cv = 0;
+          if (cv >= color_channels) cv = 0;
           if (chan_cnt[cv] > 0) break;
         }
       }
@@ -677,6 +766,8 @@ void line_segments(uint16_t peak_flag, uint16_t *left_val, uint16_t *right_val)
 #define LINE_MAX_SEG                  6
 #define LINE_ROW_SEG                  ((MAX_COL/2) / LINE_MIN_SEG)
 
+#pragma CODE_SECTION(line_segment2, "ramCode")
+
 //This function creates a display where short moving horizontal line segments
 //are randomly assigned to color channels. It is symmetric horizontally and
 //vertically, with movement from the center outward.
@@ -685,23 +776,35 @@ void line_segment2(uint16_t peak_flag, uint16_t *left_val, uint16_t *right_val)
   int16_t   idx, rot;
   uint16_t  idx2, idx3;
   uint16_t  next, len;
-  uint16_t  cv;
+  int16_t   cv;
   uint16_t  rw, cl;
   uint16_t *buff;
-  int16_t   chan_cnt[COLOR_CHANNELS];
-  Led      *cv_clr1;
-  Led      *cv_clr2;
+  uint16_t  startmask;
+  uint16_t  currmask;
+  LED_MAIN *cv_clr1;
+  LED_MAIN *cv_clr2;
+  LED_MAIN *led;
+
+//  if (ppong_fill == 0)
+    led = &led_ping[0];
+//  else
+//    led = &led_pong[0];
 
   //Compute the lower-left quadrant.  Others are mirror image.
   //Create a new random arrangement of line segments in the work buffer.
   buff = (uint16_t *)&work_buff;
 
-  if (peak_flag & (disp_frames > MIN_LINE_FRAMES))
+//  if (peak_flag & (disp_frames > MIN_LINE_FRAMES))
+  if (peak_flag)
   {
     disp_frames = 0;
+    startmask = 0;
 
-    for (idx = 0; idx < COLOR_CHANNELS; idx ++)
-      chan_cnt[idx] = ((MAX_ROW/4*MAX_COL/2) / COLOR_CHANNELS);
+    for (idx = 0; idx < color_channels; idx ++)
+      startmask |= 1 << idx;
+
+    currmask = startmask;
+//      chan_cnt[idx] = ((MAX_ROW/4*MAX_COL/2) / color_channels) + 1;
 
     for (rw = 0; rw < MAX_ROW/2; rw += 2)
     {
@@ -716,8 +819,8 @@ void line_segment2(uint16_t peak_flag, uint16_t *left_val, uint16_t *right_val)
       while (idx < MAX_COL/2)
       {
         idx2= rnd(99999);
-        cv  = idx2 % COLOR_CHANNELS;
         len = (idx2 % (LINE_MAX_SEG-LINE_MIN_SEG)) + LINE_MIN_SEG;  //line length
+        cv = find_next_color(startmask, &currmask);
 
         if ((len + idx) > MAX_COL/2)
           len = MAX_COL/2 - idx - 1;
@@ -726,20 +829,9 @@ void line_segment2(uint16_t peak_flag, uint16_t *left_val, uint16_t *right_val)
         if (len < 2)
           len = 0xff; //abort the end of the column
 
-        if (chan_cnt[cv] <= 0) //this channel has been "used up". Find another one
-        {
-          for (idx2 = 0; idx2 < COLOR_CHANNELS; idx2 ++)
-          {
-            cv ++;
-            if (cv >= COLOR_CHANNELS) cv = 0;
-            if (chan_cnt[cv] > 0) break;
-          }
-        }
-
         buff[idx3++] = cv;   //store the channel in word 0
         buff[idx3++] = len;  //store the segment length in word 1
 
-        chan_cnt[cv] -= len;
         idx += len + 1;
       }
 
@@ -750,7 +842,7 @@ void line_segment2(uint16_t peak_flag, uint16_t *left_val, uint16_t *right_val)
     }
   }
 
-  memset(led, 0, sizeof(led));
+  clear_display();
   build_color_table(left_val, right_val);
 
   disp_frames ++;
@@ -843,7 +935,7 @@ void line_segment2(uint16_t peak_flag, uint16_t *left_val, uint16_t *right_val)
 
 #pragma CODE_SECTION(arrows, "ramCode")
 
-#define MIN_ARROW_FRAMES                (FRAMES_PER_SEC * 3)
+#define MIN_ARROW_FRAMES                (FRAMES_PER_SEC * 10)
 #define ARROW_WIDTH                     3
 uint16_t display_flip;
 
@@ -856,6 +948,12 @@ void arrows(uint16_t peak_flag, uint16_t *left_val, uint16_t *right_val)
   uint16_t  rw, cl;
   uint16_t  start_cv, start_wid;
   uint16_t *row1;
+  LED_MAIN *led;
+
+//  if (ppong_fill == 0)
+    led = &led_ping[0];
+//  else
+//    led = &led_pong[0];
 
   //Choose a new pattern to display - on a peak boundary
   if (peak_flag & (disp_frames > MIN_ARROW_FRAMES))
@@ -863,7 +961,7 @@ void arrows(uint16_t peak_flag, uint16_t *left_val, uint16_t *right_val)
     disp_frames = 0;
     display_flip = rnd(10000) & 1;
 
-    start_cv  = COLOR_CHANNELS - 1;
+    start_cv  = color_channels - 1;
     start_wid = ARROW_WIDTH - 1;
 
     for (rw = 0; rw < MAX_ROW/2; rw ++)
@@ -891,7 +989,7 @@ void arrows(uint16_t peak_flag, uint16_t *left_val, uint16_t *right_val)
           if (cv > 0)
             cv --;
           else
-            cv = COLOR_CHANNELS - 1;
+            cv = color_channels - 1;
         }
       }
 
@@ -901,7 +999,7 @@ void arrows(uint16_t peak_flag, uint16_t *left_val, uint16_t *right_val)
         start_wid = 1;
         start_cv  ++;
 
-        if (start_cv == COLOR_CHANNELS)
+        if (start_cv == color_channels)
           start_cv = 0;
       }
     }
@@ -944,8 +1042,10 @@ void arrows(uint16_t peak_flag, uint16_t *left_val, uint16_t *right_val)
 }
 
 
+#pragma CODE_SECTION(draw_arrow, "ramCode")
+
 //Draws a single arrow.  xpos defines the leftmost x position.
-void draw_arrow(uint16_t chan, uint16_t lr, uint16_t xpos, uint16_t dir)
+void draw_arrow(LED_MAIN *led, uint16_t chan, uint16_t lr, uint16_t xpos, uint16_t dir)
 {
   int16_t  x, rw;
   uint16_t idx, idx2;
@@ -966,7 +1066,7 @@ void draw_arrow(uint16_t chan, uint16_t lr, uint16_t xpos, uint16_t dir)
   }
 
   temp = r + g + b;
-    
+
   if (temp > 0)
   {
     if (dir == 1) //moving left
@@ -1025,14 +1125,23 @@ void draw_arrow(uint16_t chan, uint16_t lr, uint16_t xpos, uint16_t dir)
 }
 
 
+#pragma CODE_SECTION(ripple, "ramCode")
+
 //This function draws randomly moving ripples, 1 per channel per side.
 void ripple(uint16_t peak_flag, uint16_t *left_val, uint16_t *right_val)
 {
   int16_t   idx;
   uint16_t *buff;
+  LED_MAIN *led;
+
+//  if (ppong_fill == 0)
+    led = &led_ping[0];
+//  else
+//    led = &led_pong[0];
 
   //Choose a new pattern to display - on a peak boundary
-  if (peak_flag & (disp_frames > MIN_ARROW_FRAMES))
+//  if (peak_flag & (disp_frames > MIN_ARROW_FRAMES))
+  if (peak_flag)
   {
     disp_frames = 0;
 
@@ -1040,7 +1149,7 @@ void ripple(uint16_t peak_flag, uint16_t *left_val, uint16_t *right_val)
     //Create a new random arrangement of line segments in the work buffer.
     buff = (uint16_t *)&work_buff;
 
-    for (idx = 0; idx < COLOR_CHANNELS; idx ++)
+    for (idx = 0; idx < color_channels; idx ++)
     {
       //Create left channel arrow
       buff[0] = rnd(5) + 1;        //move factor
@@ -1068,13 +1177,13 @@ void ripple(uint16_t peak_flag, uint16_t *left_val, uint16_t *right_val)
     }
   }
 
-  memset(led, 0, sizeof(led));
+  clear_display();
   build_color_table(left_val, right_val);
 
   disp_frames ++;
   buff = (uint16_t *)&work_buff;
 
-  for (idx = 0; idx < COLOR_CHANNELS; idx ++)
+  for (idx = 0; idx < color_channels; idx ++)
   {
     //Move left channel arrow
     if (buff[4] == 1) //if moving
@@ -1088,14 +1197,15 @@ void ripple(uint16_t peak_flag, uint16_t *left_val, uint16_t *right_val)
       else //moving right
       {
         buff[2] ++;
-        if (buff[2] > (MAX_COL-3))
+        if (buff[2] > (PANEL_COL-3))
           buff[5] = 1;
       }
-  
+
       buff[3] ++;
       if (buff[3] == buff[0]) //reached move count
       {
-        buff[4] = 0;
+//        buff[4] = 0;
+buff[4] = 1;
         buff[3] = 0;
       }
     }
@@ -1109,7 +1219,7 @@ void ripple(uint16_t peak_flag, uint16_t *left_val, uint16_t *right_val)
       }
     }
 
-    draw_arrow(idx, 0, buff[2], buff[5]);
+    draw_arrow(led, idx, 0, buff[2], buff[5]);
 
     //Move right channel arrow
     if (buff[10] == 1) //if moving
@@ -1117,7 +1227,7 @@ void ripple(uint16_t peak_flag, uint16_t *left_val, uint16_t *right_val)
       if (buff[11] == 1) //moving left
       {
         buff[8] --;
-        if (buff[8] < 3)
+        if (buff[8] < PANEL_COL)
           buff[11] = 2;
       }
       else //moving right
@@ -1126,7 +1236,7 @@ void ripple(uint16_t peak_flag, uint16_t *left_val, uint16_t *right_val)
         if (buff[8] > (MAX_COL-3))
           buff[11] = 1;
       }
-  
+
       buff[9] ++;
       if (buff[9] == buff[6]) //reached move count
       {
@@ -1144,14 +1254,14 @@ void ripple(uint16_t peak_flag, uint16_t *left_val, uint16_t *right_val)
       }
     }
 
-    draw_arrow(idx, 1, buff[8], buff[11]);
+    draw_arrow(led, idx, 1, buff[8], buff[11]);
 
     buff += 6 * 2; //position for the next channel
   }
 }
 
 
-#define MIN_CURVE_FRAMES              (FRAMES_PER_SEC * 3)
+#define MIN_CURVE_FRAMES              (FRAMES_PER_SEC * 10)
 #define MAX_RANGE                     (MAX_ROW - CURVE_WIDTH)
 #define MAX_X                          2.0
 #define X_INC                         (MAX_X * 2.0 / (float)MAX_COL)
@@ -1202,7 +1312,7 @@ void curves(uint16_t peak_flag, uint16_t *left_val, uint16_t *right_val)
   float     range, scale;
   float     shift, temp;
   float    *curv;
-  Led      *cv_clr;
+  LED_MAIN *cv_clr;
 
   if (peak_flag & (disp_frames > MIN_CURVE_FRAMES))
   {
@@ -1280,7 +1390,7 @@ void curves(uint16_t peak_flag, uint16_t *left_val, uint16_t *right_val)
       {
         idx = 0;
         cv ++;
-        if (cv == COLOR_CHANNELS)
+        if (cv == color_channels)
           cv = 0;
 
         if (cl < (MAX_COL/2))
@@ -1307,11 +1417,29 @@ void curves(uint16_t peak_flag, uint16_t *left_val, uint16_t *right_val)
 #endif
 
 
+#if 0
 //table to map color channels to curves, two channels per curve
 #pragma DATA_SECTION(curve_chan, "ramConsts")
+#if COLOR_CHANNELS == 3
+const uint16_t curve_chan[5 * 2] = {2, 2, 2, 2,
+                                    1, 1, 1, 0,
+                                    0, 0};
+#endif
+#if COLOR_CHANNELS == 5
+const uint16_t curve_chan[5 * 2] = {4, 4, 3, 3,
+                                    1, 1, 2, 2,
+                                    0, 0};
+#endif
+#if COLOR_CHANNELS == 7
+const uint16_t curve_chan[5 * 2] = {5, 6, 3, 3,
+                                    4, 4, 2, 2,
+                                    0, 1};
+#endif
+#if COLOR_CHANNELS == 10
 const uint16_t curve_chan[5 * 2] = {2, 3, 9, 8,
                                     7, 6, 4, 5,
                                     0, 1};
+#endif
 
 #pragma CODE_SECTION(curve2, "ramCode")
 
@@ -1343,10 +1471,17 @@ void curve2(uint16_t peak_flag, uint16_t *left_val, uint16_t *right_val)
   float     shift, temp;
   float    *buff;
   float    *tcurv, *curv;
+  LED_MAIN *led;
+
+//  if (ppong_fill == 0)
+    led = &led_ping[0];
+//  else
+//    led = &led_pong[0];
 
   buff = (float *)&work_buff[0];        //storage for display row values
 
-  if (peak_flag & (disp_frames > MIN_CURVE_FRAMES))
+//  if (peak_flag & (disp_frames > MIN_CURVE_FRAMES))
+  if (peak_flag)
   {
     disp_frames = 0;
 
@@ -1441,7 +1576,7 @@ void curve2(uint16_t peak_flag, uint16_t *left_val, uint16_t *right_val)
   }
 
 
-  memset(led, 0, sizeof(led));
+  clear_display();
   build_color_table(left_val, right_val);
 
   disp_frames ++;
@@ -1499,6 +1634,7 @@ void curve2(uint16_t peak_flag, uint16_t *left_val, uint16_t *right_val)
     }
   }
 }
+#endif
 
 
 #if 0
@@ -1583,7 +1719,7 @@ void chevron(uint16_t peak_flag, uint16_t *left_val, uint16_t *right_val)
         {
           idx = 0;
           cv ++;
-          if (cv == COLOR_CHANNELS)
+          if (cv == color_channels)
             cv = 0;
 
           if (qd < 2)
@@ -1619,14 +1755,14 @@ void chevron(uint16_t peak_flag, uint16_t *left_val, uint16_t *right_val)
 #endif
 
 
-#define SYM_NOUN                       31
+#define SYM_NOUN                       33
 #pragma DATA_SECTION(sym_noun, "ramConsts")
 const char sym_noun[SYM_NOUN][4] =
 {"BABY", "BIRD", "BONE", "BUM ",
- "BOY ", "CAT ", "COW ",
+ "BOY ", "CAT ", "COW ", "PIE ",
  "DAY ", "DOG ", "DRUM", "EYE ",
  "FIRE", "FOOD", "FOOT", "GIRL", "HAND", "HEAD",
- "LOVE", "MEAT", "MOON",
+ "LOVE", "MEAT", "MOON", "CAKE",
  "PIG ", "LIP ", "MAN ", "STAR",
  "TOY ", "YOU ", "TEAM", "THEM",
  "WHO ", "WOOD", "WORM"};
@@ -1642,12 +1778,12 @@ const char sym_verb[SYM_VERB][4] =
  "TRY ", "WAKE", "WHAT", "YES ",
  "ZAP ", "ZING", "ZOOM"};
 
-#define SYM_ADJ                        30
+#define SYM_ADJ                        31
 #pragma DATA_SECTION(sym_adj, "ramConsts")
 const char sym_adj[SYM_ADJ][4] =
 {"BAD ", "BIG ", "DAMN", "DRY ", "EASY", "FAT ",
  "COLD", "COOL", "DEEP", "FAST", "HOT ", "MAD ",
- "ODD ", "OLD ", "WET ", "WOW ",
+ "ODD ", "OLD ", "WET ", "WOW ", "OILY",
  "FUZZ", "GOOD", "HARD", "LONG",
  "LOUD", "SING", "SLIM", "SOFT", "SLOW",
  "THIN", "TORN", "UGLY", "WARM", "WILD"};
@@ -1709,13 +1845,14 @@ uint16_t get_adj(char *str)
 
 #pragma CODE_SECTION(vertical, "ramCode")
 
-#define MIN_VERTICAL_FRAMES           (FRAMES_PER_SEC * 3)
+#define MIN_VERTICAL_FRAMES           (FRAMES_PER_SEC * 8)
 #define VERT_LINE_END                 (MAX_ROW * (MAX_COL/2/2))
 #define VERT_MIN_SEG                  3
 #define VERT_MAX_SEG                  8
 #define VERT_COL_SEG                  (MAX_ROW / VERT_MIN_SEG)
 
 uint16_t sym_do_text;
+uint16_t chan_used;
 uint16_t sym_size[2];
 uint16_t sym_text_row[8];
 char     sym_text[2][4];
@@ -1725,36 +1862,58 @@ char     sym_text[2][4];
 //vertical pieces. Randomly it is overlaid with pseudo-word text.
 void vertical(uint16_t peak_flag, uint16_t *left_val, uint16_t *right_val)
 {
-  int16_t   idx, rot;
+  int16_t   idx, rot, cv;
   uint16_t  idx2, idx3;
   uint16_t  next, len;
-  uint16_t  cv, scale;
+  uint16_t  scale;
   uint16_t  rw, cl, xpos;
   uint16_t  r, g, b;
   uint32_t  r1, g1, b1;
   uint32_t  color, temp;
   uint16_t *buff;
-  int16_t   chan_cnt[COLOR_CHANNELS];
-  Led      *cv_clr1;
-  Led      *cv_clr2;
+  uint16_t  startmask;
+  uint16_t  currmask;
+  LED_MAIN *cv_clr1;
+  LED_MAIN *cv_clr2;
+  LED_MAIN *led;
+
+//  if (ppong_fill == 0)
+    led = &led_ping[0];
+//  else
+//    led = &led_pong[0];
+
+  //Set a local peak
+  if (disp_frames >= MIN_VERTICAL_FRAMES)
+    peak_flag = 1;
 
   //Choose a new pattern to display - on a peak boundary
-  if (peak_flag & (disp_frames > MIN_VERTICAL_FRAMES))
+//  if (peak_flag & (disp_frames > MIN_VERTICAL_FRAMES))
+  if (peak_flag)
   {
     disp_frames = 0;
+    startmask = 0;
+    chan_used = color_channels;
+
     sym_do_text = rnd(100);
-    if (sym_do_text < 13)
+    if (sym_do_text < 34)
       sym_do_text = 1;
     else
       sym_do_text = 0;
 
     if (sym_do_text)
     {
-      //don't allow channels 0, 1 in the background (they are used for text)
-      for (idx = 0; idx < 2; idx ++)
-        chan_cnt[idx] = -2;
-      for (idx = 2; idx < COLOR_CHANNELS; idx ++)
-        chan_cnt[idx] = (VERT_LINE_END / (COLOR_CHANNELS-2));
+      //don't allow bass channels in the background (they are used for text)
+      for (idx = 0; idx < color_channels; idx ++)
+      {
+        if (channel_freq[idx] < 2) //skip bass frequency bins
+        {
+          chan_used --;
+        }
+        else
+        {
+          startmask |= 1 << idx;
+        }
+      }
 
       for (idx = 0; idx < 8; idx ++)
       {
@@ -1809,9 +1968,11 @@ void vertical(uint16_t peak_flag, uint16_t *left_val, uint16_t *right_val)
     }
     else //no text, use all channels
     {
-      for (idx = 0; idx < COLOR_CHANNELS; idx ++)
-        chan_cnt[idx] = (VERT_LINE_END / COLOR_CHANNELS);
+      for (idx = 0; idx < color_channels; idx ++)
+        startmask |= 1 << idx;
     }
+
+    currmask = startmask;
 
     //Compute the left side.  Right side is a mirror image.
     //Create a new random arrangement of line segments in the work buffer.
@@ -1830,11 +1991,9 @@ void vertical(uint16_t peak_flag, uint16_t *left_val, uint16_t *right_val)
       while (idx < MAX_ROW)
       {
         idx2 = rnd(99999);
-        if (sym_do_text)
-          cv = idx2 % (COLOR_CHANNELS-2) + 2;
-        else
-          cv = idx2 % COLOR_CHANNELS;
         len = (idx2 % (VERT_MAX_SEG-VERT_MIN_SEG)) + VERT_MIN_SEG;    //line length
+
+        cv = find_next_color(startmask, &currmask);
 
         if ((len + idx) > MAX_ROW)
           len = MAX_ROW - idx - 1;
@@ -1843,20 +2002,9 @@ void vertical(uint16_t peak_flag, uint16_t *left_val, uint16_t *right_val)
         if (len < 2)
           len = 0xff; //abort the end of the column
 
-        if (chan_cnt[cv] <= 0) //this channel has been "used up". Find another one
-        {
-          for (idx2 = 0; idx2 < COLOR_CHANNELS; idx2 ++)
-          {
-            cv ++;
-            if (cv >= COLOR_CHANNELS) cv = 0;
-            if (chan_cnt[cv] > 0) break;
-          }
-        }
-
         buff[idx3++] = cv;   //store the channel in word 0
         buff[idx3++] = len;  //store the segment length in word 1
 
-        chan_cnt[cv] -= len;
         idx += len + 1;
       }
 
@@ -1867,7 +2015,7 @@ void vertical(uint16_t peak_flag, uint16_t *left_val, uint16_t *right_val)
     }
   }
 
-  memset(led, 0, sizeof(led));
+  clear_display();
   build_color_table(left_val, right_val);
 
   disp_frames ++;
@@ -1940,7 +2088,7 @@ void vertical(uint16_t peak_flag, uint16_t *left_val, uint16_t *right_val)
 
   if (sym_do_text)
   {
-    temp = rainbow[chan_clr[0]];
+    temp = rainbow[chan_clr[color_channels][0]];
     get_rgb(temp, &r, &g, &b);
 
     //Combine channels 0 and 1 into a single channel.
@@ -1961,7 +2109,7 @@ void vertical(uint16_t peak_flag, uint16_t *left_val, uint16_t *right_val)
       {
         idx2 = font_get_idx(sym_text[0][idx]);
         xpos -= (font_char_len(idx2) + 1);
-        draw_char(xpos, sym_text_row[idx], idx2, color);
+        draw_char(led, xpos, sym_text_row[idx], idx2, color);
       }
     }
 
@@ -1980,7 +2128,7 @@ void vertical(uint16_t peak_flag, uint16_t *left_val, uint16_t *right_val)
       for (idx = 0; idx < sym_size[1]; idx ++) //right side
       {
         idx2 = font_get_idx(sym_text[1][idx]);
-        draw_char(xpos, sym_text_row[idx], idx2, color);
+        draw_char(led, xpos, sym_text_row[idx], idx2, color);
         xpos += font_char_len(idx2) + 1;
       }
     }
@@ -1988,267 +2136,622 @@ void vertical(uint16_t peak_flag, uint16_t *left_val, uint16_t *right_val)
 }
 
 
+#pragma CODE_SECTION(fill_rect, "ramCode")
+
+void fill_rect(uint16_t bot_rw, uint16_t left_cl, uint16_t rsiz, uint16_t csiz, LED_MAIN *main, LED_MAIN clr)
+{
+  uint16_t rw, cl, idx;
+
+  for (rw = 0; rw < rsiz; rw ++)
+  {
+    for (cl = 0; cl < csiz; cl ++)
+    {
+      idx = col[bot_rw + rw][left_cl + cl];
+      main[idx].r = clr.r;
+      main[idx].g = clr.g;
+      main[idx].b = clr.b;
+    }
+  }
+}
+
+
 #pragma CODE_SECTION(two_by_two, "ramCode")
 
-#define MIN_TBT_FRAMES                (FRAMES_PER_SEC * 4)
+#define MIN_TBT_FRAMES                (FRAMES_PER_SEC * 10)
 
 #ifdef SLAVE
 uint32_t prev_mode;
 #endif
+
+uint16_t tbt_cl_size = TBT_STEP;
 
 //This function creates a display where each 2x2 pixel subarray is assigned a
 //random color organ channel.  When the peak flag is set (after a minumum number
 //of frames), it will shuffle the 2x2s. For the large array, 3x3s are created.
 void two_by_two(uint16_t peak_flag, uint16_t *left_val, uint16_t *right_val, uint32_t mode)
 {
-  uint16_t idx, idx2, idx3;
-  uint16_t cv;
-  uint16_t rw, cl;
-  int16_t  blk_cnt;
-  int16_t  shift;
-  int16_t  prev_shift;
-  uint16_t temp[TBT_ROW];
-  Led      *cv_clr;
+  int16_t  idx2, idx3;
+  int16_t  rw, cl;
+  int16_t  idx, blk_cnt;
+  LED_MAIN  cv_clr;
+  LED_MAIN *led;
 
-  cv = 0;
+//  if (ppong_fill == 0)
+    led = &led_ping[0];
+//  else
+//    led = &led_pong[0];
+
+  switch (mode)
+  {
+    case 0: //fixed arrow
+    case 1: //fixed fade
+      tbt_cl_size = PANEL_COL / (color_channels + 2);
+      break;
+    default:
+      tbt_cl_size = TBT_STEP;
+  }
+
+  blk_cnt = PANEL_COL / tbt_cl_size;
 
   //Choose a new pattern to display - on a peak boundary
-  if (peak_flag & (disp_frames > MIN_TBT_FRAMES))
+//  if (peak_flag & (disp_frames > MIN_TBT_FRAMES))
+  if (peak_flag)
   {
     disp_frames = 0;
 
-    if (mode == 1) //fixed fade
-    {
-      cv   = 0;
-      blk_cnt = 0;
-    }
-
-    if (mode > 1) //not a fixed pattern
-    {
-      //Create a new random arrangement of 2x2s or 3x3s.
-      //First, create a linear arrangement to guarantee equal channel distribution
-      idx = rnd(100);
-      if (idx < 50)
-        cv = 0; //channel numbers increasing with row number
-      else
-        cv = COLOR_CHANNELS - 2; //channel numbers decreasing with row number
-
-      for (cl = 0; cl < TBT_COL; cl += 2)
-      {
-        for (rw = 0; rw < TBT_ROW; rw ++)
-        {
-          tbt_map[rw][cl]   = cv;
-          tbt_map[rw][cl+1] = cv+1;
-
-          if (idx < 50)
-          {
-            cv += 2;
-            if (cv >= COLOR_CHANNELS)
-              cv = 0;
-          }
-          else
-          {
-            cv -= 2;
-            if (cv > COLOR_CHANNELS)
-              cv = COLOR_CHANNELS - 2;
-          }
-        }
-      }
-    }
-
-    prev_shift = rnd(TBT_ROW); //get an initial shift
-    shift = prev_shift;
-
-    for (cl = 0; cl < TBT_COL; cl ++)
-    {
-      switch (mode)
-      {
-        case 0: //fixed arrow
-          //create a symmetric, fixed row-based "arrow" pattern
-          if (cl < (TBT_COL/2))
-          {
-            for (rw = 0; rw < 2; rw ++) //rows 0 and 4, 1 and 3
-            {
-              idx3 = (COLOR_CHANNELS + cl - rw) % COLOR_CHANNELS;
-              tbt_map[rw][cl] = idx3;
-              tbt_map[rw][TBT_COL - 1 - cl] = idx3;
-              tbt_map[4-rw][cl] = idx3;
-              tbt_map[4-rw][TBT_COL - 1 - cl] = idx3;
-            }
-
-            idx3 = (COLOR_CHANNELS + cl - 2) % COLOR_CHANNELS; //row 2
-            tbt_map[2][cl] = idx3;
-            tbt_map[2][TBT_COL - 1 - cl] = idx3;
-          }
-          break;
-
-        case 1: //fixed fade
-          if (cl >= (TBT_COL/2))
-          {
-            //Set row zero, because it is always inside the array
-            tbt_map[0][cl] = cv;
-            tbt_map[0][TBT_COL/2 - 1 - (cl-(TBT_COL/2))] = cv;
-
-            blk_cnt ++;
-            if (blk_cnt == TBT_CHAN_BLOCKS)
-            {
-              cv ++;
-              blk_cnt = 0;
-            }
-
-            idx3 = cl - 1;
-            rw   = 1;
-
-            //move up and left 1 block
-            while ((rw < TBT_ROW) && (idx3 >= TBT_COL/2)) //stay inside the array
-            {
-              tbt_map[rw][idx3] = cv;
-              tbt_map[rw][TBT_COL/2 - 1 - (idx3-(TBT_COL/2))] = cv;
-
-              blk_cnt ++;
-              if (blk_cnt == TBT_CHAN_BLOCKS)
-              {
-                cv ++;
-                blk_cnt = 0;
-              }
-
-              rw   ++;
-              idx3 --;
-            }
-
-            if (cl == (TBT_COL-1)) //special case for the outside corners
-            {
-              for (rw = 1; rw < TBT_ROW; rw ++)
-              {
-                idx2 = rw;
-                idx3 = cl;
-
-                while ((idx2 < TBT_ROW) && (idx3 >= TBT_COL/2)) //stay inside the array
-                {
-                  tbt_map[idx2][idx3] = cv;
-                  tbt_map[idx2][TBT_COL/2 - 1 - (idx3-(TBT_COL/2))] = cv;
-
-                  blk_cnt ++;
-                  if (blk_cnt == TBT_CHAN_BLOCKS)
-                  {
-                    cv ++;
-                    blk_cnt = 0;
-                  }
-
-                  idx2 ++;
-                  idx3 --;
-                }
-              }
-            }
-          }
-          break;
-
-        case 2: //random blocks
-          //do random rotate by column
-          while (shift == prev_shift)
-            shift = rnd(TBT_ROW);
-
-          prev_shift = shift;
-          break;
-
-        case 3: //random wave
-          //move -1, 0 or +1 rows from the previous row to make a "wave" shape
-          if ((cl & 1) == 0)
-          {
-            if (prev_shift == 2) // in the middle; pick up or down randomly
-            {
-              if (rnd(100) < 50)
-                shift = 1;
-              else
-                shift = 3;
-            }
-            else //move towards the other end
-            {
-              if (shift < 2)
-                shift ++;
-              else
-                shift --;
-            }
-          }
-
-          prev_shift = shift;
-          break;
-      }
-
-      if (mode > 1)
-      {
-        for (rw = 0; rw < TBT_ROW; rw ++) //save the column
-          temp[rw] = tbt_map[rw][cl];
-
-        for (rw = 0; rw < TBT_ROW; rw ++)
-        {
-          idx3 = rw + shift;
-          if (idx3 >= TBT_ROW) idx3 -= TBT_ROW;
-
-          tbt_map[idx3][cl] = temp[rw];
-        }
-      }
-    }
-
-    //L/R panel invert the fixed patterns
-    if ((mode < 2) && (rnd(100) > 50))
+    for (rw = 0; rw < TBT_ROW; rw ++)
     {
       for (cl = 0; cl < TBT_COL/2; cl ++)
       {
-        for (rw = 0; rw < TBT_ROW; rw ++)
+        tbt_map[rw][cl] = 99; //initialize to all empty
+      }
+    }
+
+
+    switch (mode)
+    {
+      case 0: //fixed arrow
+
+        //create a symmetric, fixed row-based "arrow" pattern
+        for (cl = 0; cl < blk_cnt; cl ++)
+          if (cl < color_channels)
+            tbt_map[2][cl] = cl;
+
+        for (rw = 0; rw < 2; rw ++) //rows 0 and 4, 1 and 3
+        {
+          for (cl = 0; cl < color_channels; cl ++) //fill one half of the columns
+          {
+            tbt_map[rw]  [cl+(2-rw)] = tbt_map[2][cl];
+            tbt_map[4-rw][cl+(2-rw)] = tbt_map[2][cl];
+          }
+        }
+        break;
+
+      case 1: //fixed fade
+
+        //create a symmetric, fading gradient pattern
+        for (cl = 0; cl < blk_cnt; cl ++)
+          if (cl < color_channels)
+            tbt_map[2][cl] = cl;
+
+        for (rw = 0; rw < 2; rw ++) //rows 0 and 4, 1 and 3
+        {
+          idx2 = 2 - rw;
+          idx3 = rw - 2;
+
+          for (cl = 0; cl < blk_cnt; cl ++) //fill one half of the columns
+          {
+            if ((cl+idx2) < color_channels)
+              tbt_map[rw][cl] = cl+idx2;
+
+            if ((cl+idx3) <= 0)
+              tbt_map[4-rw][cl] = 0;
+            else if ((cl+idx3) < color_channels)
+              tbt_map[4-rw][cl] = cl+idx3;
+          }
+        }
+        break;
+
+      case 2: //random blocks
+        {
+          uint16_t startmask = 0;
+          uint16_t currmask;
+
+          if (mode > 1) //not a fixed pattern
+          {
+            for (idx = 0; idx < color_channels; idx ++)
+              startmask |= 1 << idx;
+          }
+
+          currmask = startmask;
+
+          for (rw = 0; rw < TBT_COL; rw ++)
+          {
+            for (cl = 0; cl < blk_cnt; cl ++) //fill one half of the columns
+            {
+              idx2 = rnd(color_channels);
+              idx2 = find_next_color(startmask, &currmask);
+
+              tbt_map[rw][cl] = idx2;
+            }
+          }
+        }
+        break;
+    }
+
+    //L/R panel invert
+    if (rnd(100) > 50)
+    {
+      for (rw = 0; rw < TBT_ROW; rw ++)
+      {
+        for (cl = 0; cl < blk_cnt/2; cl ++)
         {
           idx3 = tbt_map[rw][cl];
-          tbt_map[rw][cl] = tbt_map[rw][cl+TBT_COL/2];
-          tbt_map[rw][cl+TBT_COL/2] = idx3;
+          tbt_map[rw][cl] = tbt_map[rw][blk_cnt-(cl+1)];
+          tbt_map[rw][blk_cnt-(cl+1)] = idx3;
         }
       }
     }
+
+    //top/bottom invert
+    if (rnd(100) > 50)
+    {
+      for (rw = 0; rw < TBT_ROW/2; rw ++)
+      {
+        for (cl = 0; cl < blk_cnt; cl ++)
+        {
+          idx3 = tbt_map[rw][cl];
+          tbt_map[rw][cl] = tbt_map[TBT_ROW-1-rw][cl];
+          tbt_map[TBT_ROW-1-rw][cl] = idx3;
+        }
+      }
+    }
+
+    clear_display();
   }
 
   disp_frames ++;
   build_color_table(left_val, right_val);
 
-  #ifdef LARGE_ARRAY
-  for (rw = 1; rw < MAX_ROW; rw += TBT_STEP)
-  #else
-  for (rw = 0; rw < MAX_ROW; rw += TBT_STEP)
-  #endif
+  blk_cnt = PANEL_COL / tbt_cl_size;
+
+
+  for (rw = 0; rw < TBT_ROW; rw ++)
   {
-    for (cl = 0; cl < MAX_COL; cl += TBT_STEP)
+    for (cl = 0; cl < blk_cnt; cl ++)
     {
-      idx = tbt_map[rw/TBT_STEP][cl/TBT_STEP];
+      idx = tbt_map[rw][cl]; //color of this block
 
       //Scale the brightness to the current channel intensity
-      if (cl < panel_off[2][1])
-        cv_clr = &color_tab_left[idx];
+      if (idx == 99) //set to black
+      {
+        cv_clr.r = 0;
+        cv_clr.g = 0;
+        cv_clr.b = 0;
+      }
       else
-        cv_clr = &color_tab_right[idx];
-
-      for (idx2 = 0; idx2 < TBT_STEP; idx2 ++)
       {
-        for (idx = 0; idx < TBT_STEP; idx ++)
+        cv_clr = color_tab_left[idx];
+      }
+
+      //draw in the left panel
+      fill_rect(rw*TBT_STEP+1, PANEL_COL-((cl+1)*tbt_cl_size), TBT_STEP, tbt_cl_size, led, cv_clr);
+
+      if (rw == 0) //set row 0 to 25% of row 1
+      {
+        for (idx2 = 0; idx2 < tbt_cl_size; idx2 ++)
         {
-          idx3 = col[rw+idx][cl+idx2];
-          led[idx3].r = cv_clr->r;
-          led[idx3].g = cv_clr->g;
-          led[idx3].b = cv_clr->b;
+          idx3 = col[0][PANEL_COL-((cl+1)*tbt_cl_size)+idx2];
+          led[idx3].r = cv_clr.r >> 3;
+          led[idx3].g = cv_clr.g >> 3;
+          led[idx3].b = cv_clr.b >> 3;
         }
       }
 
-      #ifdef LARGE_ARRAY
-      if (rw == 1)
+      //draw in the right panel
+      if (idx != 99)
       {
-        for (idx2 = 0; idx2 < TBT_STEP; idx2 ++)
+        cv_clr = color_tab_right[idx];
+      }
+      fill_rect(rw*TBT_STEP+1, PANEL_COL+(cl*tbt_cl_size), TBT_STEP, tbt_cl_size, led, cv_clr);
+
+      if (rw == 0) //set row 0 to 25% of row 1
+      {
+        for (idx2 = 0; idx2 < tbt_cl_size; idx2 ++)
         {
-          idx3 = col[0][cl+idx2];
-          led[idx3].r = cv_clr->r >> 2;
-          led[idx3].g = cv_clr->g >> 2;
-          led[idx3].b = cv_clr->b >> 2;
+          idx3 = col[0][PANEL_COL+(cl*tbt_cl_size)+idx2];
+          led[idx3].r = cv_clr.r >> 3;
+          led[idx3].g = cv_clr.g >> 3;
+          led[idx3].b = cv_clr.b >> 3;
         }
       }
-      #endif
     }
   }
+}
+
+
+#pragma CODE_SECTION(draw_bar, "ramCode")
+
+void draw_bar(LED_MAIN *led, int16_t x, uint16_t y, uint16_t w, uint16_t r, uint16_t g, uint16_t b)
+{
+  uint16_t idx, idx2, idx3;
+
+  for (idx = 0; idx < y; idx ++)
+  {
+    for (idx2 = 0; idx2 < w; idx2 ++)
+    {
+      idx3 = col[idx][idx2+x];
+      led[idx3].r = r;
+      led[idx3].g = g;
+      led[idx3].b = b;
+    }
+  }
+}
+
+
+#pragma CODE_SECTION(equalizer, "ramCode")
+#define EQ_HOLD       1
+
+//This function creates an audio equalizer with a vertical bar for each
+//left and right channel.
+void equalizer(uint16_t peak_flag, uint16_t *left_val, uint16_t *right_val)
+{
+  uint16_t  idx, idx2, idx3, t;
+  uint16_t  r, g, b;
+  uint16_t  x, y, w;
+  uint32_t  color;
+  uint16_t *left;
+  uint16_t *right;
+  uint16_t *lcnt;
+  uint16_t *rcnt;
+  LED_MAIN *led;
+
+
+//  if (ppong_fill == 0)
+    led = &led_ping[0];
+//  else
+//    led = &led_pong[0];
+
+  left  = (uint16_t *)&work_buff[0];
+  right = (uint16_t *)&work_buff[MAX_CHANNELS];
+  lcnt  = (uint16_t *)&work_buff[MAX_CHANNELS*2];
+  rcnt  = (uint16_t *)&work_buff[MAX_CHANNELS*3];
+
+  if (peak_flag) //initialize the bins
+  {
+    memset(left, 0,  color_channels * sizeof(uint16_t));
+    memset(right, 0, color_channels * sizeof(uint16_t));
+  }
+  else
+  {
+    for (idx = 0; idx < color_channels; idx ++)
+    {
+      //if new volume is louder, use it directly.
+      if (left[idx] <= left_val[idx])
+      {
+        lcnt[idx] = EQ_HOLD;
+      }
+      else //decrease volume slowly
+      {
+        if (lcnt[idx] == 0)
+        {
+          t = 0;
+          idx3 = (left[idx] >> 1); //%50 (fastest)
+          for (idx2 = 0; idx2 < led_response; idx2++)
+          {
+            t += idx3;
+            idx3 >>= 1; //add 25% then 12.5 for 75% and 87.5% (slowest)
+          }
+
+          if (left_val[idx] < t)
+            left_val[idx] = t;
+        }
+        else
+        {
+          left_val[idx] = left[idx]; //hold
+          lcnt[idx] --;
+        }
+      }
+
+      //if new volume is louder, use it directly.
+      if (right[idx] <= right_val[idx])
+      {
+        rcnt[idx] = EQ_HOLD;
+      }
+      else //decrease volume slowly
+      {
+        if (rcnt[idx] == 0)
+        {
+          t = 0;
+          idx3 = (right[idx] >> 1); //%50 (fastest)
+          for (idx2 = 0; idx2 < led_response; idx2++)
+          {
+            t += idx3;
+            idx3 >>= 1; //add 25% then 12.5 for 75% and 87.5% (slowest)
+          }
+
+          if (right_val[idx] < t)
+            right_val[idx] = t;
+        }
+        else
+        {
+          right_val[idx] = right[idx]; //hold
+          rcnt[idx] --;
+        }
+      }
+    }
+  }
+
+  //clear the display each frame
+  clear_display();
+  w = PANEL_COL / color_channels;
+
+  for (idx = 0; idx < color_channels; idx ++) //channel loop
+  {
+    color = channel_color[idx];
+    get_rgb(color, &r, &g, &b);
+
+    x = PANEL_COL - ((idx + 1) * w);
+    y = left[idx] >> 4;
+    if (y > 0)  y ++;
+    if (y > 16) y = 16;
+
+    draw_bar(led, x, y, w, r, g, b);
+
+    x = PANEL_COL + (idx * w);
+    y = right[idx] >> 4;
+    if (y > 0)  y ++;
+    if (y > 16) y = 16;
+
+    draw_bar(led, x, y, w, r, g, b);
+  }
+
+  memcpy(left, left_val,  color_channels * sizeof(uint16_t));
+  memcpy(right, right_val, color_channels * sizeof(uint16_t));
+}
+
+
+#pragma CODE_SECTION(equalizer_hires, "ramCode")
+
+//This function creates an audio equalizer with vertical bars, but each
+//column is a different mix of frequency bins:
+//   0..15 (16), 16..46x2 ea(16), 48..176x32 ea (4)
+//Colors will blend each of the defined channels evenly.
+void equalizer_hires(uint16_t peak_flag, uint16_t *left_val, uint16_t *right_val)
+{
+  uint16_t  idx, idx2, idx3;
+  int16_t   r, g, b;
+  int16_t   r2, g2, b2;
+  int16_t   ri, gi, bi;
+  uint16_t  x, y;
+  int16_t   col, t;
+  int16_t   w;
+  float     temp, max;
+  uint32_t  color;
+  uint16_t *left, *left2;
+  uint16_t *right, *right2;
+  uint16_t *lcnt;
+  uint16_t *rcnt;
+  uint32_t *clr_data;
+  LED_MAIN *led;
+
+
+  led = &led_ping[0];
+
+  left  = (uint16_t *)&work_buff[0];
+  right = (uint16_t *)&work_buff[PANEL_COL];
+  left2 = (uint16_t *)&work_buff[PANEL_COL*2];
+  right2= (uint16_t *)&work_buff[PANEL_COL*3];
+  lcnt  = (uint16_t *)&work_buff[PANEL_COL*4];
+  rcnt  = (uint16_t *)&work_buff[PANEL_COL*5];
+  clr_data = (uint32_t *)&work_buff[PANEL_COL*6];
+
+  w = PANEL_COL / (color_channels - 1); //columns between colors
+  col = w * (color_channels - 1);       //total columns
+//  rem = PANEL_COL - col;                //extra columns
+
+  if (peak_flag) //initialize the column colors
+  {
+    idx2 = 0;
+    idx3 = 0;
+
+    memset(left2, 0,  PANEL_COL * sizeof(uint16_t));
+    memset(right2, 0, PANEL_COL * sizeof(uint16_t));
+
+    for (idx = 0; idx < col; idx ++)
+    {
+      if (idx2 == 0)
+      {
+        color = channel_color[idx3];
+        r  = (color >> 16) & 0xff;
+        g  = (color >>  8) & 0xff;
+        b  = (color      ) & 0xff;
+        color = channel_color[idx3+1];
+        r2 = (color >> 16) & 0xff;
+        g2 = (color >>  8) & 0xff;
+        b2 = (color      ) & 0xff;
+        t  = (r2 - r);
+        ri = t / w;
+        t  = (g2 - g);
+        gi = t / w;
+        t  = (b2 - b);
+        bi = t / w;
+      }
+
+      clr_data[idx] = ((uint32_t)r << 16) + ((uint32_t)g << 8) + b;
+      r += ri;
+      g += gi;
+      b += bi;
+
+      idx2 ++;
+      if (idx2 == w)
+      {
+        idx2 = 0;
+        idx3 ++;
+      }
+    }
+  }
+
+  //Grab the first 16 range bins, skipping DC.
+  idx2 = 1;
+
+  for (idx = 0; idx < 16; idx ++)
+  {
+    //left channel
+    temp = RFFTmagBuff1[idx2];
+    temp = temp * temp;
+    if (temp < (float)MAX_RGB_VAL)
+      left[idx] = temp;
+    else
+      left[idx] = MAX_RGB_VAL;
+
+    temp = RFFTmagBuff2[idx2];
+    temp = temp * temp;
+    if (temp < (float)MAX_RGB_VAL)
+      right[idx] = temp;
+    else
+      right[idx] = MAX_RGB_VAL;
+
+    idx2++;
+  }
+
+  //Grab the next 32 range bins, using 2 bins for each column.
+  for (idx = 16; idx < 32; idx ++)
+  {
+    //left channel
+    temp = RFFTmagBuff1[idx2];
+    max  = RFFTmagBuff1[idx2+1];
+    if (temp > max)
+      max = temp;
+    max = max * max;
+    if (max < (float)MAX_RGB_VAL)
+      left[idx] = max;
+    else
+      left[idx] = MAX_RGB_VAL;
+
+    temp = RFFTmagBuff2[idx2];
+    max  = RFFTmagBuff2[idx2+1];
+    if (temp > max)
+      max = temp;
+    max = max * max;
+    if (max < (float)MAX_RGB_VAL)
+      right[idx] = max;
+    else
+      right[idx] = MAX_RGB_VAL;
+
+    idx2 += 2;
+  }
+
+  //Grab the next 128 range bins, using 32 bins for each column.
+  for (idx = 32; idx < col; idx ++)
+  {
+    //left channel
+    max = 0;
+    for (idx3 = 0; idx3 < 32; idx3++)
+    {
+      temp = RFFTmagBuff1[idx2+idx3];
+      if (temp > max)
+        max = temp;
+    }
+    max = max * max;
+    if (max < (float)MAX_RGB_VAL)
+      left[idx] = max;
+    else
+      left[idx] = MAX_RGB_VAL;
+
+    max = 0;
+    for (idx3 = 0; idx3 < 32; idx3++)
+    {
+      temp = RFFTmagBuff2[idx2+idx3];
+      if (temp > max)
+        max = temp;
+    }
+
+    max = max * max;
+    if (max < (float)MAX_RGB_VAL)
+      right[idx] = max;
+    else
+      right[idx] = MAX_RGB_VAL;
+
+    idx2 += 32;
+  }
+
+  clear_display();
+
+  for (idx = 0; idx < col; idx ++) //column loop
+  {
+    if (left2[idx] <= left[idx])
+    {
+      lcnt[idx] = EQ_HOLD;
+    }
+    else //decrease volume slowly
+    {
+      if (lcnt[idx] == 0)
+      {
+        t = 0;
+        idx3 = (left2[idx] >> 1); //%50 (fastest)
+        for (idx2 = 0; idx2 < led_response; idx2++)
+        {
+          t += idx3;
+          idx3 >>= 1; //add 25% then 12.5 for 75% and 87.5% (slowest)
+        }
+
+        if (left[idx] < t)
+          left[idx] = t;
+      }
+      else
+      {
+        left[idx] = left2[idx]; //hold
+        lcnt[idx] --;
+      }
+    }
+
+    if (right2[idx] <= right[idx])
+    {
+      rcnt[idx] = EQ_HOLD;
+    }
+    else //decrease volume slowly
+    {
+      if (rcnt[idx] == 0)
+      {
+        t = 0;
+        idx3 = (right2[idx] >> 1); //%50 (fastest)
+        for (idx2 = 0; idx2 < led_response; idx2++)
+        {
+          t += idx3;
+          idx3 >>= 1; //add 25% then 12.5 for 75% and 87.5% (slowest)
+        }
+
+        if (right[idx] < t)
+          right[idx] = t;
+      }
+      else
+      {
+        right[idx] = right2[idx]; //hold
+        rcnt[idx] --;
+      }
+    }
+
+    color = clr_data[idx];
+    get_rgb(color, (uint16_t *)&r, (uint16_t *)&g, (uint16_t *)&b);
+
+    x = PANEL_COL - (idx + 1);
+    y = left[idx] >> 4;
+    if (y > 0)  y ++;
+    if (y > 16) y = 16;
+
+    draw_bar(led, x, y, 1, r, g, b);
+
+    x = PANEL_COL + idx;
+    y = right[idx] >> 4;
+    if (y > 0)  y ++;
+    if (y > 16) y = 16;
+
+    draw_bar(led, x, y, 1, r, g, b);
+  }
+
+  memcpy(left2, left,  PANEL_COL * sizeof(uint16_t));
+  memcpy(right2, right, PANEL_COL * sizeof(uint16_t));
 }
 
 
@@ -2270,7 +2773,7 @@ void color_bars(uint16_t side, uint16_t *chan_val)
     side_offset = PANEL_COL * 2;
 
 
-  for (idx = 0; idx < COLOR_CHANNELS; idx ++)
+  for (idx = 0; idx < color_channels; idx ++)
   {
     if (idx < MAX_ROW)
     {
@@ -2313,7 +2816,7 @@ typedef struct
 //  uint16_t  x, xlim;
 //  uint16_t  y, ylim;
 #pragma CODE_SECTION(draw_blob, "ramCode")
-void draw_blob(uint16_t channel, uint16_t blob, uint16_t lr, lavadata *lptr)
+void draw_blob(LED_MAIN *led, uint16_t channel, uint16_t blob, uint16_t lr, lavadata *lptr)
 {
   uint16_t  idx;
   uint16_t  r, g, b;
@@ -2447,13 +2950,25 @@ void draw_blob(uint16_t channel, uint16_t blob, uint16_t lr, lavadata *lptr)
 }
 
 
+#if 0
 #pragma CODE_SECTION(lavalamp, "ramCode")
 
-#define MIN_LAVALAMP_FRAMES             (FRAMES_PER_SEC * 5)
+#define MIN_LAVALAMP_FRAMES             (FRAMES_PER_SEC * 12)
 #define LAVABLOBS                       2
 
 #pragma DATA_SECTION(lava_order, "ramConsts")
+#if COLOR_CHANNELS == 3
+const uint16_t lava_order[COLOR_CHANNELS] = {1, 2, 0};
+#endif
+#if COLOR_CHANNELS == 5
+const uint16_t lava_order[COLOR_CHANNELS] = {4, 2, 1, 3, 0};
+#endif
+#if COLOR_CHANNELS == 7
+const uint16_t lava_order[COLOR_CHANNELS] = {6, 4, 5, 3, 1, 2, 0};
+#endif
+#if COLOR_CHANNELS == 10
 const uint16_t lava_order[COLOR_CHANNELS] = {6, 8, 4, 1, 9, 5, 2, 7, 3, 0};
+#endif
 
 //This function creates a display that mimics a lavalamp.
 void lavalamp(uint16_t peak_flag, uint16_t *left_val, uint16_t *right_val)
@@ -2461,12 +2976,19 @@ void lavalamp(uint16_t peak_flag, uint16_t *left_val, uint16_t *right_val)
   uint16_t  idx, idx2, idx3;
   uint16_t  count;
   lavadata *lptr = (lavadata *)&work_buff[MAX_LEDS>>1];
+  LED_MAIN *led;
 
-  if (peak_flag & (disp_frames > MIN_LAVALAMP_FRAMES))
+//  if (ppong_fill == 0)
+    led = &led_ping[0];
+//  else
+ //   led = &led_pong[0];
+
+//  if (peak_flag & (disp_frames > MIN_LAVALAMP_FRAMES))
+  if (peak_flag)
   {
     disp_frames = 0;
 
-    for (idx = 0; idx < COLOR_CHANNELS; idx ++)
+    for (idx = 0; idx < color_channels; idx ++)
     {
       for (idx2 = 0; idx2 < 2; idx2 ++) //left/right
       {
@@ -2507,10 +3029,10 @@ void lavalamp(uint16_t peak_flag, uint16_t *left_val, uint16_t *right_val)
   disp_frames ++;
 
   //clear the display each frame
-  memset(led, 0, sizeof(led));
+  clear_display();
   build_color_table(left_val, right_val);
 
-  for (idx = 0; idx < COLOR_CHANNELS; idx ++)
+  for (idx = 0; idx < color_channels; idx ++)
   {
     for (idx2 = 0; idx2 < 2; idx2 ++) //left/right
     {
@@ -2518,200 +3040,10 @@ void lavalamp(uint16_t peak_flag, uint16_t *left_val, uint16_t *right_val)
 
       for (idx3 = 0; idx3 < count; idx3 ++)
       {
-        draw_blob(lava_order[idx], idx3, idx2, lptr);
+        draw_blob(led, lava_order[idx], idx3, idx2, lptr);
 
         lptr ++;
       }
-    }
-  }
-}
-
-
-#ifdef FLOODS
-#pragma CODE_SECTION(floods, "ramCode")
-
-//This function is the main display routine for the flood lights. It takes
-//histagrammed and averaged channel data from the prep routine and displays
-//the top two channels.
-void floods(uint16_t *left_val, uint16_t *right_val)
-{
-  uint32_t color1, color2;
-  uint32_t color3, color4;
-  uint16_t idx;
-  uint16_t lidx1, lidx2;
-  uint16_t ridx1, ridx2;
-  uint16_t rw, cl;
-  uint16_t r1, g1, b1, cv1;
-  uint16_t r2, g2, b2, cv2;
-
-//Future updates: ?
-//if largest is > 4x any other, then use for both halves.
-//update every frame?
-
-  //To reduce flicker, see if the top 2 simply swapped sides
-  if ((top_chan_l[0] == top_chan_l_prev[1]) ||
-      (top_chan_l[1] == top_chan_l_prev[0]))
-  {
-    idx = top_chan_l[0];
-    top_chan_l[0] = top_chan_l_prev[1];
-    top_chan_l[1] = idx;
-  }
-  if ((top_chan_r[0] == top_chan_r_prev[1]) ||
-      (top_chan_r[1] == top_chan_r_prev[0]))
-  {
-    idx = top_chan_r[0];
-    top_chan_r[0] = top_chan_r_prev[1];
-    top_chan_r[1] = idx;
-  }
-
-  switch (chan_count_l)
-  {
-    case 0: //no channels this frame - keep the previous one(s)
-      lidx1  = top_chan_l_prev[0];
-      lidx2  = top_chan_l_prev[1];
-      color1 = rainbow[chan_clr[lidx1]];
-      color2 = rainbow[chan_clr[lidx2]];
-      idx = top_chan_l_lvl[0];
-      top_chan_l_lvl[0] = (idx >> 1) + (idx >> 2);
-      idx = top_chan_l_lvl[1];
-      top_chan_l_lvl[1] = (idx >> 1) + (idx >> 2);
-      break;
-
-    case 1: //just one channel this frame
-      lidx1  = top_chan_l[0];
-      lidx2  = top_chan_l[1];
-      color1 = rainbow[chan_clr[lidx1]];
-      color2 = color1;
-
-      for (idx = 0; idx < MAX_CHAN; idx++)
-        top_chan_l_prev[idx] = top_chan_l[idx];
-      break;
-
-    case 2: //two or more channels this frame
-      lidx1  = top_chan_l[0];
-      lidx2  = top_chan_l[1];
-      color1 = rainbow[chan_clr[lidx1]];
-      color2 = rainbow[chan_clr[lidx2]];
-
-      for (idx = 0; idx < MAX_CHAN; idx++)
-        top_chan_l_prev[idx] = top_chan_l[idx];
-      break;
-  }
-
-  switch (chan_count_r)
-  {
-    case 0: //no channels this frame - keep the previous one(s)
-      ridx1  = top_chan_r_prev[0];
-      ridx2  = top_chan_r_prev[1];
-      color3 = rainbow[chan_clr[ridx1]];
-      color4 = rainbow[chan_clr[ridx2]];
-      idx = top_chan_r_lvl[0];
-      top_chan_r_lvl[0] = (idx >> 1) + (idx >> 2);
-      idx = top_chan_r_lvl[1];
-      top_chan_r_lvl[1] = (idx >> 1) + (idx >> 2);
-      break;
-
-    case 1: //just one channel this frame
-      ridx1  = top_chan_r[0];
-      ridx2  = top_chan_r[1];
-      color3 = rainbow[chan_clr[ridx1]];
-      color4 = color3;
-
-      for (idx = 0; idx < MAX_CHAN; idx++)
-        top_chan_r_prev[idx] = top_chan_r[idx];
-      break;
-
-    case 2: //two or more channels this frame
-      ridx1  = top_chan_r[0];
-      ridx2  = top_chan_r[1];
-      color3 = rainbow[chan_clr[ridx1]];
-      color4 = rainbow[chan_clr[ridx2]];
-
-      for (idx = 0; idx < MAX_CHAN; idx++)
-        top_chan_r_prev[idx] = top_chan_r[idx];
-      break;
-  }
-
-  for (cl = 0; cl < FLOOD_COL; cl ++)
-  {
-    if (cl == 0)
-    {
-      //Scale the brightness to the current channel intensity
-      //Get the base color for this side
-      get_rgb(color1, &r1, &g1, &b1);
-      get_rgb(color3, &r2, &g2, &b2);
-
-      cv1 = left_val[lidx1];
-      if (cv1 < MIN_RGB_VAL)
-        cv1 = MIN_RGB_VAL;
-
-      cv2 = right_val[ridx1];
-      if (cv2 < MIN_RGB_VAL)
-        cv2 = MIN_RGB_VAL;
-
-      //If this side of the panel drops > 25% keep it at 25%
-      if (cv1 < top_chan_l_lvl[0])
-        cv1 = top_chan_l_lvl[0];
-
-      if (cv2 < top_chan_r_lvl[0])
-        cv2 = top_chan_r_lvl[0];
-
-      top_chan_l_lvl[0] = (cv1 >> 1) + (cv1 >> 2);
-      top_chan_r_lvl[0] = (cv2 >> 1) + (cv2 >> 2);
-
-      r1 = (r1 * cv1) >> 8;
-      g1 = (g1 * cv1) >> 8;
-      b1 = (b1 * cv1) >> 8;
-
-      r2 = (r2 * cv2) >> 8;
-      g2 = (g2 * cv2) >> 8;
-      b2 = (b2 * cv2) >> 8;
-    }
-    else if (cl == (FLOOD_COL / 2))
-    {
-      //Scale the brightness to the current channel intensity
-      //Get the base color for this side
-      get_rgb(color2, &r1, &g1, &b1);
-      get_rgb(color4, &r2, &g2, &b2);
-
-      cv1 = left_val[lidx2];
-      if (cv1 < MIN_RGB_VAL)
-        cv1 = MIN_RGB_VAL;
-
-      cv2 = right_val[ridx2];
-      if (cv2 < MIN_RGB_VAL)
-        cv2 = MIN_RGB_VAL;
-
-      //If this side of the panel drops > 25% keep it at 25%
-      if (cv1 < top_chan_l_lvl[1])
-        cv1 = top_chan_l_lvl[1];
-
-      if (cv2 < top_chan_r_lvl[1])
-        cv2 = top_chan_r_lvl[1];
-
-      top_chan_l_lvl[1] = (cv1 >> 1) + (cv1 >> 2);
-      top_chan_r_lvl[1] = (cv2 >> 1) + (cv2 >> 2);
-
-      r1 = (r1 * cv1) >> 8;
-      g1 = (g1 * cv1) >> 8;
-      b1 = (b1 * cv1) >> 8;
-
-      r2 = (r2 * cv2) >> 8;
-      g2 = (g2 * cv2) >> 8;
-      b2 = (b2 * cv2) >> 8;
-    }
-
-    for (rw = 0; rw < FLOOD_ROW; rw ++)
-    {
-      idx = fcol[rw][cl];
-      fled[idx].r = r1; //left channel, flood 1
-      fled[idx].g = g1;
-      fled[idx].b = b1;
-
-      idx += FLOOD_STRING_MEM_LEN;
-      fled[idx].r = r2; //right channel, flood 1
-      fled[idx].g = g2;
-      fled[idx].b = b2;
     }
   }
 }
@@ -2720,7 +3052,12 @@ void floods(uint16_t *left_val, uint16_t *right_val)
 
 #define HIGH_BIAS     0x20
 #define HIGH_PASS     0x10
+#define ADC_CPU_NOISE 0.7
+#define ADC_CLA_NOISE 0.1
+#define REDUCE_NOISE
+
 #pragma CODE_SECTION(color_organ_prep, "ramCode")
+
 
 //This function prepares the FFT output bins for the display routines.
 #ifndef FLOODS
@@ -2733,36 +3070,45 @@ void color_organ_prep(uint16_t  side,
                       uint16_t *hyst_sum)
 #endif
 {
-  uint16_t idx, idx2, idx3, end;
+  uint16_t idx;
+  uint16_t idx2;
+  uint16_t idx3;
+  uint16_t t, end;
   float    temp, max;
-  float    maxlo, maxmid, maxhi;
-  #ifdef FLOODS
-  uint16_t imax;
-  uint16_t chan_sort[COLOR_CHANNELS];
-  #endif
-  #ifdef OLD_STYLE_BULBS
-  uint16_t prev_cv[COLOR_CHANNELS];
-  #endif
 
-  idx3  = 1;
+  #ifdef BAND_SCALE
+  float    maxlo, maxmid, maxhi;
   maxhi = 0;
   maxmid= 0;
   maxlo = 0;
+  #endif
 
-  for (idx = 0; idx < COLOR_CHANNELS; idx++)
+  uint16_t prev_cv[MAX_CHANNELS];
+
+  idx3 = 1;
+
+  for (idx = 0; idx < color_channels; idx++)
   {
-    #ifdef OLD_STYLE_BULBS
     //Save off the last frame's value
     prev_cv[idx] = chan_val[idx];
-    #endif
 
     max = 0;
-    end = chan_bin[idx+1]; //this depends on one extra entry in the array
+    end = channel_freq[idx+1]; //this depends on one extra entry in the array
 
-    for (idx2 = chan_bin[idx]; idx2 < end; idx2 ++)
+    for (idx2 = channel_freq[idx]; idx2 < end; idx2 ++)
     {
+      #ifdef REDUCE_NOISE
+        #ifdef USE_CLA
+        temp = fft_bin[idx3] - ADC_CLA_NOISE;
+        #else
+        temp = fft_bin[idx3] - ADC_CPU_NOISE;
+        #endif
+      #else
+      temp = fft_bin[idx3];
+      #endif
+
       //Square the data to make more difference between large and small values
-      temp = (fft_bin[idx3] * fft_bin[idx3]);
+      temp = temp * temp * audio_gain;
 
       if (max < temp)
         max = temp;
@@ -2771,13 +3117,14 @@ void color_organ_prep(uint16_t  side,
 
     chan_val[idx] = (uint16_t) max;
 
-    if (idx < 3) //low freq channels
+    #ifdef BAND_SCALE
+    if (idx < bass_chan) //low freq channels
     {
       if (maxlo < max)
         maxlo = max;
     }
     else
-    if (idx < 6) //mid freq channels
+    if (idx < midr_chan) //mid freq channels
     {
       if (maxmid < max)
         maxmid = max;
@@ -2788,26 +3135,36 @@ void color_organ_prep(uint16_t  side,
         maxhi = max;
     }
 
-    //Don't pass very small values through for bass channels.
-    if ((idx <= 1) && (chan_val[idx] < HIGH_PASS))
+    #else //scale each channel independently
+
+    if (max > (float)MAX_RGB_VAL)
+    {
+      temp = max / (float)MAX_RGB_VAL;
+      chan_val[idx] /= temp;
+    }
+    #endif
+
+    //Don't pass very small values through for some channels.
+    if (((idx == 0) || (idx == color_channels-1)) && (chan_val[idx] < HIGH_PASS))
       chan_val[idx] = 0;
   }
 
   //Since the highest channel registers lower with the same signal strength
   //give it a boost if it's not zero.
-  if (chan_val[COLOR_CHANNELS-1] > 0)
-    chan_val[COLOR_CHANNELS-1] += HIGH_BIAS;
+  if (chan_val[color_channels-1] > 0)
+    chan_val[color_channels-1] += HIGH_BIAS;
 
   //Give half as much boost to the next-to-highest channel.
-  if (chan_val[COLOR_CHANNELS-2] > 0)
-    chan_val[COLOR_CHANNELS-2] += (HIGH_BIAS >> 1);
+  if (chan_val[color_channels-2] > 0)
+    chan_val[color_channels-2] += (HIGH_BIAS >> 1);
 
+#ifdef BAND_SCALE
   //Scale the data to the maximum component RGB value.
   if (maxlo > (float)MAX_RGB_VAL)
   {
     temp = maxlo / (float)MAX_RGB_VAL;
 
-    for (idx = 0; idx < 3; idx++)
+    for (idx = 0; idx < bass_chan; idx++)
     {
       chan_val[idx] /= temp;
     }
@@ -2817,7 +3174,7 @@ void color_organ_prep(uint16_t  side,
   {
     temp = maxmid / (float)MAX_RGB_VAL;
 
-    for (idx = 3; idx < 6; idx++)
+    for (idx = bass_chan; idx < midr_chan; idx++)
     {
       chan_val[idx] /= temp;
     }
@@ -2827,90 +3184,30 @@ void color_organ_prep(uint16_t  side,
   {
     temp = maxhi / (float)MAX_RGB_VAL;
 
-    for (idx = 6; idx < COLOR_CHANNELS; idx++)
+    for (idx = midr_chan; idx < color_channels; idx++)
     {
       chan_val[idx] /= temp;
     }
   }
+#endif
 
-  #ifdef OLD_STYLE_BULBS
   //Incandescent bulbs cannot flash at 15 or 30Hz. Apply a fading factor to
   //slow the LEDs down a bit. We don't want to put people into a trance... ;^)
-  for (idx = 0; idx < COLOR_CHANNELS; idx++)
+  for (idx = 0; idx < color_channels; idx++)
   {
-    //If the new value is less than half, set it to half instead.
-    if (chan_val[idx] < (prev_cv[idx] >> 1))
-      chan_val[idx] = prev_cv[idx] >> 1;
+    t = 0;
+    idx3 = (prev_cv[idx] >> 2); //%25 (fastest)
+    for (idx2 = 1; idx2 < led_response; idx2++)
+      t += idx3; //25%, 50% or 75%
+
+    //If the new value is less than x%, set it to x% instead.
+    if (chan_val[idx] < t)
+      chan_val[idx] = t;
   }
-  #endif
 
   #ifdef FLOODS
-  //Update the hysteresis buffers
-  for (idx = 0; idx < COLOR_CHANNELS; idx++)
-  {
-    if (side == 0) //left
-    {
-      //subtract the oldest entry from the sum
-      hyst_sum[idx] -= hyst_l[idx][hyst_idx];
-
-      //add the new entry to the sum and buffer
-      hyst_sum[idx] += chan_val[idx];
-      hyst_l[idx][hyst_idx] = chan_val[idx];
-    }
-    else //right
-    {
-      //subtract the oldest entry from the sum
-      hyst_sum[idx] -= hyst_r[idx][hyst_idx];
-
-      //add the new entry to the sum and buffer
-      hyst_sum[idx] += chan_val[idx];
-      hyst_r[idx][hyst_idx] = chan_val[idx];
-    }
-  }
-
-  if (side == 1) //right, and now done with both sides so update the index
-  {
-    hyst_idx ++;
-    if (hyst_idx == HYST_SIZE)
-      hyst_idx = 0;
-
-    chan_count_r = 0;
-  }
-  else
-    chan_count_l = 0;
-
-
-  //Sort the strength of the color channels using the hysteresis sums (sort the top two)
-
-  for (idx = 0; idx < MAX_CHAN; idx++)
-  {
-    imax = 0; //will keep the max found
-    idx3 = 0; //will keep the index
-
-    for (idx2 = idx; idx2 < COLOR_CHANNELS; idx2++)
-    {
-      if (idx == 0)
-        chan_sort[idx2] = hyst_sum[idx2];
-
-      if (chan_sort[idx2] > imax)
-      {
-        imax = chan_sort[idx2];
-        idx3 = idx2; //save the index
-      }
-    }
-
-    //Now save the max's channel index and clear it from the list
-    if (imax > 0)
-    {
-      if (side == 0)
-        chan_count_l ++;
-      else
-        chan_count_r ++;
-    }
-
-    top_chan[idx]   = idx3;
-    chan_sort[idx3] = 0; //clear the max from the list
-  }
+  //This function assumes left side is called first.
+  update_hyst(side, color_channels);
   #endif
 }
 
@@ -2918,7 +3215,7 @@ void color_organ_prep(uint16_t  side,
 #pragma CODE_SECTION(draw_char, "ramCode")
 
 //Draw a character starting at lower-left x,y, and clip to the array.
-void draw_char(int16_t x, int16_t y, int16_t idx, uint32_t color)
+void draw_char(LED_MAIN *led, int16_t x, int16_t y, int16_t idx, uint32_t color)
 {
   int16_t   ix, iy, clm, tmp;
   uint16_t  bits;
@@ -2969,7 +3266,7 @@ void draw_char(int16_t x, int16_t y, int16_t idx, uint32_t color)
 void show_text(int16_t dispmode, int16_t panel, uint32_t color, int16_t delay, char *str)
 {
   int16_t  x, y;
-  uint16_t idx, idx2, idx3;
+  int16_t  idx, idx2, idx3;
   uint16_t s_len, p_len;
   uint16_t word_idx;
   uint16_t curr_len;
@@ -2978,6 +3275,12 @@ void show_text(int16_t dispmode, int16_t panel, uint32_t color, int16_t delay, c
   uint16_t str_idx[FONT_MAX_CHAR];
   uint16_t char_wid[FONT_MAX_CHAR];
   uint16_t word_clr[5];
+  LED_MAIN *led;
+
+//  if (ppong_fill == 0)
+    led = &led_ping[0];
+//  else
+//    led = &led_pong[0];
 
   disp_clr = color;
 
@@ -2997,34 +3300,50 @@ void show_text(int16_t dispmode, int16_t panel, uint32_t color, int16_t delay, c
     if (p_len > PANEL_COL) //won't fit in one panel
       dispmode = 1; //force total array mode
 
+    if (color == 0xffffffff)
+      disp_clr = rainbow[rnd(12)];
+
     if (dispmode == 0) //center in one panel
     {
       x = panel_off[panel][1] + (PANEL_COL/2) - (p_len/2);
       y = panel_off[panel][0] + (PANEL_ROW/2) - (FONT_HEIGHT/2);
+      if (x < 0) x = 0;
+
+      for (idx = 0; idx < s_len; idx++)
+      {
+        draw_char(led, x, y, str_idx[idx], disp_clr);
+        x += fontchar[str_idx[idx]].wid + 1;
+      }
     }
-    else if (dispmode == 1) //center in total array
+    else if (dispmode == 1) //center in total array, but don't split a character
     {
-      x = (MAX_COL / 2) - (p_len / 2);
+      idx2 = s_len / 2;
+      idx3 = idx2-1;
+      if (str[idx3] == ' ') idx3 --; //ignore a space
+
       y = (MAX_ROW / 2) - (FONT_HEIGHT / 2);
-    }
+      x = PANEL_COL - (fontchar[str_idx[idx3]].wid + 1);
 
-    if (x < 0) x = 0;
-    if (color == 0xffffffff)
-      disp_clr = rainbow[rnd(12)];
+      for (idx = idx3; idx >= 0; idx--) //draw left panel
+      {
+        draw_char(led, x, y, str_idx[idx], disp_clr);
+        x -= (fontchar[str_idx[idx-1]].wid + 1);
+      }
 
-    for (idx = 0; idx < s_len; idx++)
-    {
-      if ((color == 0xffffffff) && (str_idx[idx] == FONT_SPACE_IDX))
-        disp_clr = rainbow[rnd(12)];
+      x = PANEL_COL;
+      idx3 = idx2;
+      if (str[idx3] == ' ') idx3 ++; //ignore a space
 
-      draw_char(x, y, str_idx[idx], disp_clr);
-      x += fontchar[str_idx[idx]].wid + 1;
+      for (idx = idx3; idx < s_len; idx++) //draw right panel
+      {
+        draw_char(led, x, y, str_idx[idx], disp_clr);
+        x += (fontchar[str_idx[idx]].wid + 1);
+      }
     }
 
     for (idx3 = 0; idx3 < delay; idx3 ++)
     {
       wait_for_sync(1);
-      pause = 0;
 
       if (end_of_gap)
         return;
@@ -3052,22 +3371,20 @@ void show_text(int16_t dispmode, int16_t panel, uint32_t color, int16_t delay, c
       {
         word_idx = 0;
         idx3 = MAX_COL - idx + char_wid[idx2];
-        draw_char(idx3, y, str_idx[idx2], 0x000000); //black out the previous write
+        draw_char(led, idx3, y, str_idx[idx2], 0x000000); //black out the previous write
 
         if ((color == 0xffffffff) && (str_idx[idx] == FONT_SPACE_IDX))
           disp_clr = rainbow[word_clr[word_idx++]];
-        draw_char(idx3-1, y, str_idx[idx2], disp_clr);
+        draw_char(led, idx3-1, y, str_idx[idx2], disp_clr);
       }
 
       wait_for_sync(1);
-      pause = 0;
 
       if (end_of_gap)
         return;
     }
 
     wait_for_sync(delay);
-    pause = 0;
   }
 }
 
@@ -3144,7 +3461,7 @@ void initial_display(void)
 {
   char str[2];
 
-  memset(led, 0, sizeof(led));
+  clear_display();
 
   //Display the panel number in each panel to identify correct hookup.
   str[0] = '1'; str[1] = 0;
@@ -3166,88 +3483,73 @@ void initial_display(void)
 }
 
 
-#define MIN_DISPLAY_FRAMES                (FRAMES_PER_SEC * 5)
+#define MIN_DISPLAY_FRAMES                (FRAMES_PER_SEC * 16)
 #pragma CODE_SECTION(do_display, "ramCode")
 
 //This is the main display driver for the color organ.
+uint16_t prev_display;
+
 void do_display(uint16_t peak_flag, uint16_t *chan_left, uint16_t *chan_right)
 {
-  #if defined(MASTER) || defined(SLAVE)
-  uint16_t prev_display;
-  #endif
+  uint16_t idx, dir;
+  uint16_t disp_peak;
+  uint16_t disp_flag;
 
   if (display == 9999) //force start-up to initialize a peak
   {
     peak_flag = 1;
   }
 
+  disp_peak = 0;
+
   //Choose a new pattern to display - on a peak boundary
   #ifndef SLAVE
   if (peak_flag & (display_frames > MIN_DISPLAY_FRAMES))
   {
-    display_frames = 0;
-    disp_frames = 99999;
-    #ifdef MASTER
+    disp_peak = 1;
+    display_frames = 0;  //for this function's use
+    disp_frames = 99999; //for display-local use
     prev_display = display;
-    #endif
 
-    display = rnd(100);
-//if (display < 50)
-//display = 20;
-//else
-//display = 95;
+    dir = rnd(2);
+    disp_flag = 1 << rnd(MAX_DISPLAYS);
 
-    switch (display)
+    for (idx = 0; idx < MAX_DISPLAYS; idx ++)
     {
-      case 0 ... 14:
-        display_mode = 0; //line segments
+      if ((disp_flag & avail_disp) != 0) //got a match
+      {
+        display = disp_flag;
         break;
+      }
 
-      case 15 ... 32:
-        display_mode = 1; //ripple
-        break;
+      if (dir == 0)
+      {
+        disp_flag <<= 1;
+        if (disp_flag > MAX_DISP_FLAG) //wrap the flag
+          disp_flag = 1;
+      }
+      else
+      {
+        disp_flag >>= 1;
+        if (disp_flag == 0) //wrap the flag
+          disp_flag = MAX_DISP_FLAG;
+      }
+    }
 
-      case 33 ... 49:
-        display_mode = 2; //curves
-        break;
-
-      case 50 ... 64:
-        display_mode = 3; //vertical line segments
-        break;
-
-      case 65 ... 84:
-        display_mode = 4; //lavalamp
-        break;
-
-      case 85 ... 89:
-        display_mode = 5; //two_by_two (arrow)
-        break;
-
-      case 90 ... 94:
-        display_mode = 6; //two_by_two (fade)
-        break;
-
-      case 95 ... 99:
-        display_mode = 7; //two_by_two (random wave)
-        break;
-    };
 
     #ifdef MASTER
-    if (display != prev_display)
-    {
       //If running as master, set a new mode value for the slave
-      set_mode(display_mode); //can only send values 0..7
-    }
+      set_mode(display); //can only send values 0..7
     #endif
   }
   #endif //not a slave
 
   #ifdef SLAVE
   //If running as slave, grab the master's current mode every frame
-  prev_display = display_mode;
-  get_mode(&display_mode);
+  prev_display = display;
+  get_mode(&display);
 
-  if (display_mode != prev_display)
+  if (display != prev_display)
   {
     peak_flag = 1;
     disp_frames = 99999;
@@ -3256,38 +3558,39 @@ void do_display(uint16_t peak_flag, uint16_t *chan_left, uint16_t *chan_right)
 
   display_frames ++;
 
-  switch (display_mode)
+  switch (display)
   {
-    case 0:
-      line_segment2(peak_flag, chan_left, chan_right);
+    case 0x01:
+      line_segment2(disp_peak, chan_left, chan_right);
       break;
 
-    case 1:
-      ripple(peak_flag, chan_left, chan_right);
+    case 0x02:
+      vertical(disp_peak, chan_left, chan_right);
       break;
 
-    case 2:
-      curve2(peak_flag, chan_left, chan_right);
+    case 0x04:
+      ripple(disp_peak, chan_left, chan_right);
       break;
 
-    case 3:
-      vertical(peak_flag, chan_left, chan_right);
+    case 0x08:
+      equalizer_hires(peak_flag, chan_left, chan_right);
       break;
 
-    case 4:
-      lavalamp(peak_flag, chan_left, chan_right);
+    case 0x10:
+//      lavalamp(disp_peak, chan_left, chan_right);
+      equalizer(peak_flag, chan_left, chan_right);
       break;
 
-    case 5:
-      two_by_two(peak_flag, chan_left, chan_right, 0); //arrow
+    case 0x20:
+      two_by_two(disp_peak, chan_left, chan_right, 0); //arrow
       break;
 
-    case 6:
-      two_by_two(peak_flag, chan_left, chan_right, 1); //fade
+    case 0x40:
+      two_by_two(disp_peak, chan_left, chan_right, 1); //gradient
       break;
 
-    case 7:
-      two_by_two(peak_flag, chan_left, chan_right, 3); //random wave
+    case 0x80:
+      two_by_two(disp_peak, chan_left, chan_right, 2); //random
       break;
   };
 

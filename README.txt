@@ -1,7 +1,7 @@
 ************************************************************************
-* Program: 20 Channel Stereo Color Organ
+* Program: Multi Channel Stereo Color Organ
 *
-* Purpose: To transform normal stereo audio output into 10 channels of
+* Purpose: To transform normal stereo audio output into 3-10 channels of
 *          dancing, pulsing colored lights (per audio channel).
 *
 * Supported LED strings:
@@ -11,25 +11,32 @@
 *
 * Supported Micro Controllers:
 *          TI F28377 (TI LaunchPad) 200Mhz development board
+*          TI F28379 (TI LaunchPad) 200Mhz development board
 *
 * Required Tools:
-*          CCSv6 or v7, C2000 compilers, ControlSuite
+*          CCSv7 or v8, C2000 compilers, ControlSuite
 *
 * Required Launchpad connections:
 *   Audio In: (eg. headphone jack from iPhone, iPad, etc.)
-*     J3-pin 27: Left channel positive
+*     J3-pin 27: Left  channel positive
 *     J3-pin 29: Right channel positive
 *     Any GND:   Common (negative) from the audio device
 *
 *   LED Lights:
-*     J4-pin 40: Data wire of WS2811 or WS2812 lights, Left chan, string 1
-*     J4-pin 39: Data wire of WS2811 or WS2812 lights, Left chan, string 2
-*     J4-pin 38: Data wire of WS2811 or WS2812 lights, Right chan, string 1
-*     J4-pin 37: Data wire of WS2811 or WS2812 lights, Right chan, string 2
-*     J4-pin 34: Data wire of WS2812 (only) lights, Left chan flood
-*     J4-pin 33: Data wire of WS2812 (only) lights, Right chan flood
-*                (note: floods cannot be used with WS2811 panels)
+*     J4-pin 40: (GPIO 12) Data wire of WS2811/2 lights, Left chan, string 1
+*     J4-pin 39: (GPIO 13) Data wire of WS2811/2 lights, Left chan, string 2
+*     J4-pin 38: (GPIO 14) Data wire of WS2811/2 lights, Right chan, string 1
+*     J4-pin 37: (GPIO 15) Data wire of WS2811/2 lights, Right chan, string 2
+*     J4-pin 36: (GPIO 16) Data wire of WS2811/2 lights, Left chan flood
+*     J4-pin 35: (GPIO 17) Data wire of WS2811/2 lights, Right chan flood
 *     Any GND:   Ground wires of all LED strings
+*
+* Bluetooth Transceiver (SH-HC-08) connections:
+*     Any 3V3: to VCC
+*     Any GND: to GND
+*     J8-pin 77: to STATE
+*     J8-pin 76: to RXD
+*     J8-pin 75: to TXD
 *
 *   Multi-color organ control: (to run two color organs together)
 *     J1-pin  7: Display mode bit 2. Requires compiling with either MASTER or SLAVE
@@ -53,6 +60,26 @@
 *
 *   Launchpad Power:
 *     Currently, power must be supplied via the USB jack.
+*
+*   UART Command Cheat Sheet:
+*   (Host to F2837x, hex values. See msg.h for definitions)
+*
+*     Get Capabilities: 80 00
+*     Get Defaults:     81 00
+*     Set Chan Count:   82 01 count
+*     Set Chan Color:   83 04 chan R G B
+*     Set Chan Freq:    84 03 chan start end
+*     Set Displays:     85 02 mask_hi mask_lo
+*     Set Audio Gain:   86 01 gain
+*     Set LED Response: 87 02 led flood
+*     Set Text Message: 88  N text
+*     Control           89 02 mode fps
+*
+*   (F2837x to Host, hex values. See msg.h for definitions)
+*
+*     Defaults:         90 xx
+*     Capabilities:     91 xx
+*     Message Response: 92 01 result_code
 *
 ************************************************************************
 
@@ -105,18 +132,15 @@ Important parts of the code:
 Building Notes:
 
 The following #defines are optionally defined in the CCS project properties:
-  1) WS2811 - needed if the 4 primary LED strings are WS2811 type LEDs.
-  2) WS2812 - needed if the 4 primary LED strings are WS2812 type LEDs.
-  3) FLOODS - needed if using the two extra GPIOs listed above for color floods.
-  4) LARGE_ARRAY - needed if compiling for the larger of the two array sizes
-     defined in display.c.
-  5) FLASH - needed when compiling to store the program in F28377s flash. Note,
+  1) FLOODS - needed if using the two extra GPIOs listed above for color floods.
+  2) USE_CLA - (mandatory) The code now uses the CLA to big bang the LED GPIOs.
+  3) FLASH - needed when compiling to store the program in F28377s flash. Note,
      this requires changing which .cmd file is used as described below.
 
   When connecting two color organs together for syncronized operation, each
   will need one of the following defined: (not all displays may be supported)
-  6) MASTER - will choose the display.
-  7) SLAVE - will use the master's display choice.
+  5) MASTER - will choose the display.
+  6) SLAVE - will use the master's display choice.
 
 To build for RAM (CCS fast turnaround debugging)
 

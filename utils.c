@@ -13,13 +13,10 @@
 uint32_t  randnum;
 
 extern volatile struct CPUTIMER_REGS CpuTimer1Regs;
-#if 0 //def FLASH
+#ifdef FLASH
 extern uint16_t RFFTinBuff1[FFT_SIZE];
 extern uint16_t RFFTinBuff2[FFT_SIZE];
 extern uint16_t fft_ready;
-
-void start_adc_timer(void);
-void stop_adc_timer(void);
 #endif
 
 
@@ -27,7 +24,7 @@ void stop_adc_timer(void);
 //(debugging) don't waste code space, just use a static seed.
 void init_rnd(uint32_t seed)
 {
-#if 0 //def FLASH
+#ifdef FLASH
   uint16_t idx;
   uint32_t sum = 0;
 
@@ -56,6 +53,8 @@ void init_rnd(uint32_t seed)
 
 //This function returns a random integer between 0 and (max - 1)
 //renamed from "rand" because of conflict with stdlib.h. :(
+#pragma CODE_SECTION(rnd, "ramCode")
+
 uint32_t rnd(uint32_t max)
 {
   randnum = (randnum * 1664525) + 1013904223;
@@ -64,6 +63,22 @@ uint32_t rnd(uint32_t max)
     return(0);
   else
     return (randnum % max);
+}
+
+
+extern uint16_t connected;
+
+#pragma CODE_SECTION(get_connected_state, "ramCode")
+void get_connected_state(void)
+{
+  uint32_t *gpio[1];
+  uint32_t  temp;
+
+  //Get address of GPIO A "data" registers on F28377S.
+  gpio[0] = (uint32_t *)0x07f00; //data reg
+
+  temp = *gpio[0];
+  connected = (temp >> 11) & 0x01; //read value of GPIO11
 }
 
 

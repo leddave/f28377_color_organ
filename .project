@@ -28,17 +28,23 @@
 		<link>
 			<name>F2837xS_Adc.c</name>
 			<type>1</type>
-			<locationURI>PARENT-2-PROJECT_LOC/ti/controlSUITE/device_support/F2837xS/v210/F2837xS_common/source/F2837xS_Adc.c</locationURI>
+			<locationURI>PARENT-2-ORIGINAL_PROJECT_ROOT/ti/controlSUITE/device_support/F2837xS/v210/F2837xS_common/source/F2837xS_Adc.c</locationURI>
 		</link>
 		<link>
 			<name>F2837xS_CpuTimers.c</name>
 			<type>1</type>
-			<locationURI>PARENT-2-PROJECT_LOC/ti/controlSUITE/device_support/F2837xS/v190/F2837xS_common/source/F2837xS_CpuTimers.c</locationURI>
+			<locationURI>PARENT-2-ORIGINAL_PROJECT_ROOT/ti/controlSUITE/device_support/F2837xS/v190/F2837xS_common/source/F2837xS_CpuTimers.c</locationURI>
 		</link>
 		<link>
 			<name>F2837xS_Gpio.c</name>
 			<type>1</type>
-			<locationURI>PARENT-2-PROJECT_LOC/ti/controlSUITE/device_support/F2837xS/v190/F2837xS_common/source/F2837xS_Gpio.c</locationURI>
+			<locationURI>PARENT-2-ORIGINAL_PROJECT_ROOT/ti/controlSUITE/device_support/F2837xS/v190/F2837xS_common/source/F2837xS_Gpio.c</locationURI>
 		</link>
 	</linkedResources>
+	<variableList>
+		<variable>
+			<name>ORIGINAL_PROJECT_ROOT</name>
+			<value>file:/C:/Delfino/f28377_color_organ</value>
+		</variable>
+	</variableList>
 </projectDescription>

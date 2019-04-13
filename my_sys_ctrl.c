@@ -32,6 +32,15 @@ extern unsigned int ramCode_runstart;
 extern unsigned int ramConsts_loadstart;
 extern unsigned int ramConsts_loadsize;
 extern unsigned int ramConsts_runstart;
+#ifdef USE_CLA
+extern unsigned int Cla1ProgLoadStart;
+extern unsigned int Cla1ProgLoadSize;
+extern unsigned int Cla1ProgRunStart;
+
+extern unsigned int Cla1ConstLoadStart;
+extern unsigned int Cla1ConstLoadSize;
+extern unsigned int Cla1ConstRunStart;
+#endif
 #endif
 
 
@@ -65,6 +74,16 @@ void InitSysCtrl(void)
   memcpy(&ramConsts_runstart,
          &ramConsts_loadstart,
          (uint32_t)&ramConsts_loadsize);
+
+  #ifdef USE_CLA
+  memcpy(&Cla1ProgRunStart,
+         &Cla1ProgLoadStart,
+         (uint32_t)&Cla1ProgLoadSize);
+
+  memcpy(&Cla1ConstRunStart,
+         &Cla1ConstLoadStart,
+         (uint32_t)&Cla1ConstLoadSize);
+  #endif
 
   // Call Flash Initialization to setup flash waitstates
   // This function must reside in RAM
